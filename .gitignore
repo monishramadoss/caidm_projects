@@ -6,7 +6,8 @@ __pycache__/
 # Data Files
 data/
 logs/
-ckp/
+ckp*
+checkpoint
 .jarvis/
 
 # C extensions

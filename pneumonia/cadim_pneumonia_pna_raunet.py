@@ -18,7 +18,7 @@ import tensorflow as tf
 from tensorflow import optimizers #, losses
 from tensorflow.keras import Input
 #import tensorflow_addons as tfa
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 from jarvis.train import datasets
 from jarvis.train.client import Client
@@ -70,9 +70,9 @@ def dice_coef_loss(y_true, y_pred):
 def train():
     
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        filepath='./ckp',
+        filepath='./ckp/',
         save_weights_only=True,
-        monitor='val_loss',
+        monitor='val_accuracy',
         mode='max',
         save_best_only=True
     )

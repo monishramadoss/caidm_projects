@@ -1,87 +1,80 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jul 24 17:10:02 2020
-
-@author: MonishRamadoss
-"""
-import glob
+import os
 import numpy as np
+import pandas as pd
 import tensorflow as tf
-from tensorflow.keras import Input, Model, models, layers
-from medpy.io import load
-	
-mask_list = []
-image_list = []
-for file in glob.glob('**/*.mhd',  recursive=True):
-	if 'r.mhd' in file:
-		mask_list.append(file)
-	elif 'cti.mhd' in file:
-		image_list.append(file)
+from tensorflow import optimizers #, losses
+from tensorflow.keras import Input
+#import tensorflow_addons as tfa
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-def im_gen():
-	data_set = list()
-	label_set = list()
-	for path0, path1 in zip(mask_list, image_list):
-		image, header_img = load(path1)
-		mask_img, header_mask = load(path0)
-		mask_img = np.transpose(image, (2, 0, 1))
-		image = np.transpose(image, (2,0,1))
-		for i in range(image.shape[0]):
-			data_set.append(np.expand_dims(image[i], 0))
-			label_set.append(np.expand_dims(mask_img[i], 0))
-	return np.array(data_set), np.array(label_set)
+from jarvis.train import datasets
+from jarvis.train.client import Client
+from jarvis.utils.general import overload, tools as jtools
 
-	
-def normalize(x):
-	x = np.asarray(x)
-	return (x - x.min()) / (np.ptp(x))
-	
-if __name__ == '__main__':
-	
-	inputs = Input(shape=(1, 512, 512))
-	
-	# --- Define model
-	# --- Define kwargs dictionary
-	kwargs = {
-		'kernel_size': 3,
-		'padding': 'same'}
-	
-	# --- Define lambda functions
-	conv = lambda x, filters, strides : layers.Conv2D(filters=filters, strides=strides, **kwargs)(x)
-	norm = lambda x : layers.BatchNormalization()(x)
-	relu = lambda x : layers.LeakyReLU()(x)
-	
-	# --- Define stride-1, stride-2 blocks
-	conv1 = lambda filters, x : relu(norm(conv(x, filters, strides=1)))
-	conv2 = lambda filters, x : relu(norm(conv(x, filters, strides=2)))
-	# --- Define single transpose
-	tran = lambda x, filters, strides : layers.Conv2DTranspose(filters=filters, strides=strides, **kwargs)(x)
-	# --- Define transpose block
-	tran2 = lambda filters, x : relu(norm(tran(x, filters, strides=2)))
-	concat = lambda a, b : layers.Concatenate(axis=1)([a, b])
-	
-	
-	l1 = conv1(16, inputs)
-	l2 = conv1(32, conv2(16, l1))
-	l3 = conv1(48, conv2(32, l2))
-	l4 = conv1(64, conv2(48, l3))
-	l5 = conv1(128, conv2(64, l4))
-	l6 = tran2(64, l5)
-	l7 = tran2(48, conv1(64, concat(l4, l6)))
-	l8 = tran2(32, conv1(48, concat(l3, l7)))
-	l9 = tran2(16, conv1(32, concat(l2, l8)))
-	l10 = conv1(16, l9)
-	logits = layers.Conv2D(filters=1, **kwargs)(l10)
-	model = Model(inputs=inputs, outputs=logits)
-	
-	train_examples, train_labels = im_gen()
-	train_labels = normalize(train_labels)
-	tf_dataset = tf.data.Dataset.from_tensor_slices((train_examples, train_labels))
-	tf_dataset = tf_dataset.shuffle(100).batch(1)
-	print(train_examples.shape)
+from model import RA_UNET
 
-	optimizer=tf.keras.optimizers.Adam()
-	loss= tf.keras.losses.MeanSquaredError(reduction='sum_over_batch_size')
-	metrics = ['accuracy']
-	model.compile(optimizer = optimizer, loss= loss, metrics= metrics)
-	model.fit(train_examples, train_labels, epochs = 10)
+paths = datasets.download(name='ct/structseg')
+
+# full body seg
+# client = Client('{}/data/ymls/client-full.yml'.format(paths['code']))
+client = Client('{}/data/ymls/client-cardiac.yml'.format(paths['code']))
+gen_train, gen_valid = client.create_generators()
+
+def dice(y_true, y_pred, c=1, epsilon=1):
+    A = 0
+    B = 0
+    y_true_slice = y_true
+    y_pred_slice = y_pred
+    true = y_true_slice[..., 0] == c
+    pred = np.argmax(y_pred_slice, axis=-1) == c
+    A = np.count_nonzero(true & pred) * 2
+    B = np.count_nonzero(true) + np.count_nonzero(pred) + epsilon
+    return A / B
+
+def dice_coef(y_true, y_pred, smooth=1.):
+    y_true_f = tf.keras.backend.flatten(y_true)
+    y_pred_f = tf.cast(tf.keras.backend.flatten(tf.keras.backend.argmax(y_pred)), y_true_f.dtype)
+    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
+    return (2. * intersection + smooth) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
+
+def dice_coef_loss(y_true, y_pred):
+    return 1 - dice_coef(y_true, y_pred)
+    client.load_data_in_memory()
+
+def train():
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='./ckp/',
+        save_weights_only=True,
+        monitor='val_accuracy',
+        mode='max',
+        save_best_only=True)
+
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs")
+    model = RA_UNET(inputs)
+    model.compile(optimizer=optimizers.Adam(learning_rate=2e-5, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+        loss={
+            'pna': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+            },
+        metrics={
+            'pna': ['accuracy', dice_coef]
+        })
+    model.fit(x=gen_train,
+        steps_per_epoch=300,
+        epochs=30,
+        validation_data=gen_valid,
+        validation_steps=100,
+        validation_freq=10,
+        callbacks=[tensorboard_callback, model_checkpoint_callback])
+
+def test(model):
+    lung_seg = []
+    for x,y in test_valid:
+        logits = model.predict(x)
+        if type(logits) is dict:
+            logits = logits['pna']
+        lung_seg.append(dice(y['pna'][0], logits[0]))
+
+    lung_seg = np.array(lung_seg)
+    print(lung_seg.mean())
+
+if __name__ == "__main__":
+    train()

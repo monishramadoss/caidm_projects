@@ -5,7 +5,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{b08b268e-577a-4b7b-8fd1-83a1e55f8a3a}</ProjectGuid>
     <ProjectHome />
-    <StartupFile>cadim_pneumonia_pna_raunet.py</StartupFile>
+    <StartupFile>Pneumonia.py</StartupFile>
     <SearchPath />
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
@@ -19,7 +19,7 @@
     <VisualStudioVersion Condition=" '$(VisualStudioVersion)' == '' ">10.0</VisualStudioVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="cadim_pneumonia_pna_raunet.py" />
+    <Compile Include="Pneumonia.py" />
     <Compile Include="model.py" />
   </ItemGroup>
   <ItemGroup>

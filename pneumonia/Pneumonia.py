@@ -29,23 +29,23 @@ from model import RA_UNET
 paths = datasets.download(name='ct/pna')
 path = '{}/data/ymls/client.yml'.format(paths['code'])
 print(path)
-gen_train, gen_valid, client = datasets.prepare(name='ct/pna')
 
-# @overload(Client)
-# def preprocess(self, arrays, **kwargs):   
-#     lng = arrays['xs']['lng']
-#     pna = arrays['ys']['pna']
-#     dat = arrays['xs']['dat']
-#     #norm = np.linalg.norm(dat)
-#     #dat = dat/norm
-#     arrays['xs']['lng'] = lng.astype(np.float32)    
-#     arrays['xs']['dat'] = dat.astype(np.float32)
-#     arrays['ys']['pna'] = pna.astype(np.int64)
+@overload(Client)
+def preprocess(self, arrays, **kwargs):   
+    lng = arrays['xs']['lng']
+    pna = arrays['ys']['pna']
+    dat = arrays['xs']['dat']
+    #norm = np.linalg.norm(dat)
+    #dat = dat/norm
+    arrays['xs']['lng'] = lng.astype(np.float32)    
+    arrays['xs']['dat'] = dat.astype(np.float32)
+    arrays['ys']['pna'] = pna.astype(np.int64)
 
-#     return arrays
+    return arrays
 
 inputs = client.get_inputs(Input)
-#scce = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+client = Client(path)
+gen_train, gen_valid = client.create_generators()
 
 def dice(y_true, y_pred, c=1, epsilon=1):    
     A = 0

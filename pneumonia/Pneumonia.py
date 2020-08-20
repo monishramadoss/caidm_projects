@@ -43,9 +43,9 @@ def preprocess(self, arrays, **kwargs):
 
     return arrays
 
-inputs = client.get_inputs(Input)
 client = Client(path)
 gen_train, gen_valid = client.create_generators()
+inputs = client.get_inputs(Input)
 
 def dice(y_true, y_pred, c=1, epsilon=1):    
     A = 0

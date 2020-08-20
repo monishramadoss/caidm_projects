@@ -13,11 +13,11 @@ from jarvis.utils.general import overload, tools as jtools
 
 from model import RA_UNET
 
-paths = datasets.download(name='ct/structseg', path='./data')
-
+paths = datasets.download(name='ct/structseg')
+print(paths)
 # full body seg
 # client = Client('{}/data/ymls/client-full.yml'.format(paths['code']))
-client = Client('{}/data/ymls/client-cardiac.yml'.format(paths['code']))
+client = Client('{}/data/ymls/client-heart.yml'.format(paths['code']))
 gen_train, gen_valid = client.create_generators()
 
 def dice(y_true, y_pred, c=1, epsilon=1):

@@ -26,7 +26,9 @@ from jarvis.utils.general import overload, tools as jtools
 
 from model import RA_UNET
 
-datasets.download(name='ct/pna')
+paths = datasets.download(name='ct/pna')
+path = '{}/data/ymls/client.yml'.format(paths['code'])
+print(path)
 gen_train, gen_valid, client = datasets.prepare(name='ct/pna')
 
 # @overload(Client)
@@ -94,7 +96,7 @@ def train():
     model.compile(
         optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': custom.dsc(weights=inputs['lng'])
+            'pna': custom.sce(inputs['lng'])
             },
         metrics={
             'pna': ['accuracy', custom.dsc(weights=inputs['lng'])]

@@ -94,10 +94,10 @@ def train():
     model.compile(
         optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': custom.dce(weights=inputs['lng'])
+            'pna': custom.dsc(weights=inputs['lng'])
             },
         metrics={
-            'pna': ['accuracy', custom.dce(weights=inputs['lng'])]
+            'pna': ['accuracy', custom.dsc(weights=inputs['lng'])]
             }        
     )
 

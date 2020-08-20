@@ -47,17 +47,6 @@ client = Client(path)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
-def dice(y_true, y_pred, c=1, epsilon=1):    
-    A = 0
-    B = 0
-    y_true_slice = y_true
-    y_pred_slice = y_pred
-    true = y_true_slice[..., 0] == c
-    pred = np.argmax(y_pred_slice, axis=-1) == c 
-    A = np.count_nonzero(true & pred) * 2
-    B = np.count_nonzero(true) + np.count_nonzero(pred) + epsilon    
-    return A / B
-
 xs, ys = next(gen_train)
 print(np.max(xs['dat']), np.min(xs['dat']))
 
@@ -71,7 +60,6 @@ def dice_coef(y_true, y_pred):
 
 def dice_coef_loss(y_true, y_pred):
     dice = 1 - dice_coef(y_true[:,:,:,:,:], y_pred[:,:,:,:,:])    
-    #SCCE = scce(y_true, y_pred)
     return dice
 
 def train():
@@ -92,11 +80,17 @@ def train():
         write_graph=False
     )
 
+    def sce(weights, scale=1.0):
+        loss = losses.SparseCategoricalCrossentropy(from_logits=True)
+        def sce(y_true, y_pred):
+            return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
+        return sce
+
     model = RA_UNET(inputs)
     model.compile(
         optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': custom.sce(inputs['lng'])
+            'pna': sce(inputs['lng'])
             },
         metrics={
             'pna': ['accuracy', custom.dsc(weights=inputs['lng'])]

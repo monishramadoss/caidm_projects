@@ -9,39 +9,41 @@ Original file is located at
 
 # Commented out IPython magic to ensure Python compatibility.
 # % pip install -q jarvis-md
-# % pip install -q tensorflow-model-optimization
+# % pip install -q tensorflow-model-optimizationpi 
 
 import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tensorflow import optimizers #, losses
+from tensorflow import optimizers, losses
 from tensorflow.keras import Input
 #import tensorflow_addons as tfa
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-from jarvis.train import datasets
+from jarvis.train import datasets, custom
 from jarvis.train.client import Client
 from jarvis.utils.general import overload, tools as jtools
 
 from model import RA_UNET
 
-datasets.download(name='ct/pna', path='./data')
+datasets.download(name='ct/pna')
+gen_train, gen_valid, client = datasets.prepare(name='ct/pna')
 
-@overload(Client)
-def preprocess(self, arrays, **kwargs):
-   
-    lng = arrays['xs']['lng']
-    pna = arrays['ys']['pna']
-    arrays['xs']['lng'] = lng.astype(np.float32)    
-    arrays['ys']['pna'] = pna.astype(np.float32)
-    return arrays
+# @overload(Client)
+# def preprocess(self, arrays, **kwargs):   
+#     lng = arrays['xs']['lng']
+#     pna = arrays['ys']['pna']
+#     dat = arrays['xs']['dat']
+#     #norm = np.linalg.norm(dat)
+#     #dat = dat/norm
+#     arrays['xs']['lng'] = lng.astype(np.float32)    
+#     arrays['xs']['dat'] = dat.astype(np.float32)
+#     arrays['ys']['pna'] = pna.astype(np.int64)
 
-yml = '{}/data/ymls/client.yml'.format(jtools.get_paths('ct/pna')['code'])
-client = Client(yml)
-gen_train, gen_valid = client.create_generators()
-test_train, test_valid = client.create_generators(test=True)
+#     return arrays
+
 inputs = client.get_inputs(Input)
+#scce = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
 
 def dice(y_true, y_pred, c=1, epsilon=1):    
     A = 0
@@ -54,19 +56,22 @@ def dice(y_true, y_pred, c=1, epsilon=1):
     B = np.count_nonzero(true) + np.count_nonzero(pred) + epsilon    
     return A / B
 
+xs, ys = next(gen_train)
+print(np.max(xs['dat']), np.min(xs['dat']))
 
-def dice_coef(y_true, y_pred, smooth=1.):
+def dice_coef(y_true, y_pred):
+    smoothing = 1e-7
     y_true_f = tf.keras.backend.flatten(y_true)
-    y_pred_f = tf.cast(tf.keras.backend.flatten(tf.keras.backend.argmax(y_pred)), y_true_f.dtype)
+    y_pred_f = tf.keras.backend.flatten(tf.keras.backend.argmax(y_pred))
+    y_pred_f = tf.cast(y_pred_f, y_true_f.dtype)
     intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
-    return (2. * intersection + smooth) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
+    return (2. * intersection + smoothing) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smoothing)
 
+def dice_coef_loss(y_true, y_pred):
+    dice = 1 - dice_coef(y_true[:,:,:,:,:], y_pred[:,:,:,:,:])    
+    #SCCE = scce(y_true, y_pred)
+    return dice
 
-def dice_coef_loss(y_true, y_pred):        
-    return 1 - dice_coef(y_true, y_pred)
-    client.load_data_in_memory()
-
-    
 def train():
     
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -78,25 +83,31 @@ def train():
     )
 
 
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs")
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+        log_dir="./logs", 
+        histogram_freq=1,
+        write_images=True,
+        write_graph=False
+    )
+
     model = RA_UNET(inputs)
     model.compile(
-        optimizer=optimizers.Adam(learning_rate=2e-5, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+        optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+            'pna': custom.dce(weights=inputs['lng'])
             },
         metrics={
-            'pna': ['accuracy', dice_coef]
+            'pna': ['accuracy', custom.dce(weights=inputs['lng'])]
             }        
     )
 
     model.fit(
         x=gen_train,
-        steps_per_epoch=300,
         epochs=30,
+        steps_per_epoch=2000,
         validation_data=gen_valid,
-        validation_steps=100,
-        validation_freq=10,
+        validation_steps=500,
+        validation_freq=1,
         callbacks=[tensorboard_callback, model_checkpoint_callback]
     )
 
@@ -114,6 +125,7 @@ def test(model):
     
 if __name__ == "__main__":
     train()
+    pass
     
 
 

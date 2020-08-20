@@ -9,7 +9,7 @@ logs/
 ckp*
 checkpoint
 .jarvis/
-
+.vs/
 # C extensions
 *.so
 

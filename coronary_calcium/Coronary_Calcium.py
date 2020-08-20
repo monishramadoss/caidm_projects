@@ -13,7 +13,7 @@ from jarvis.utils.general import overload, tools as jtools
 
 from model import RA_UNET
 
-paths = datasets.download(name='ct/structseg')
+paths = datasets.download(name='ct/structseg', path='./data')
 
 # full body seg
 # client = Client('{}/data/ymls/client-full.yml'.format(paths['code']))
@@ -77,4 +77,5 @@ def test(model):
     print(lung_seg.mean())
 
 if __name__ == "__main__":
-    train()
+    #train()
+    pass

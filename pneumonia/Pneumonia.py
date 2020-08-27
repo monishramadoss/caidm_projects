@@ -89,7 +89,7 @@ def train():
     model.compile(
         optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': happy_meal(1.5, 0)
+            'pna': happy_meal(1.5, 1)
             },
         metrics={
             'pna': ['accuracy', custom.dsc()]

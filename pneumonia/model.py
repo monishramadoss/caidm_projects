@@ -104,53 +104,53 @@ def build_res_atten_unet_3d(x, filter_num=32, merge_axis=-1, pool_size=(1, 2, 2)
     conv1 = layers.BatchNormalization()(conv1)
     conv1 = layers.Activation('relu')(conv1)
 
-    #pool = layers.MaxPooling3D(pool_size=pool_size)(conv1)
-    pool = residual_block(conv1, output_channels=filter_num * 4, stride=2,name='pool')
+    pool = layers.MaxPooling3D(pool_size=pool_size)(conv1)
+    pool = residual_block(pool, output_channels=filter_num * 4, name='pool')
     res1 = residual_block(pool, output_channels=filter_num * 4)
 
-    #pool1 = layers.MaxPooling3D(pool_size=pool_size)(res1)
-    pool1 = residual_block(res1, output_channels=filter_num*8, stride=2, name='pool1')
+    pool1 = layers.MaxPooling3D(pool_size=pool_size)(res1)
+    pool1 = residual_block(pool1, output_channels=filter_num*8, name='pool1')
     res2 = residual_block(pool1, output_channels=filter_num * 8)
 
-    #pool2 = layers.MaxPooling3D(pool_size=pool_size)(res2)
-    pool2 = residual_block(res2, output_channels=filter_num*16, stride=2, name='pool2')
+    pool2 = layers.MaxPooling3D(pool_size=pool_size)(res2)
+    pool2 = residual_block(res2, output_channels=filter_num*16,  name='pool2')
     res3 = residual_block(pool2, output_channels=filter_num * 16)
 
-    #pool3 = layers.MaxPooling3D(pool_size=pool_size)(res3)
-    pool3 = residual_block(res3, output_channels=filter_num*32, stride=2, name='pool3')
+    pool3 = layers.MaxPooling3D(pool_size=pool_size)(res3)
+    pool3 = residual_block(res3, output_channels=filter_num*32,  name='pool3')
     res4 = residual_block(pool3, output_channels=filter_num * 32)
 
-    #pool4 = layers.MaxPooling3D(pool_size=pool_size)(res4)
-    pool4 = residual_block(res4, output_channels=filter_num*64, stride=2, name='pool4')
+    pool4 = layers.MaxPooling3D(pool_size=pool_size)(res4)
+    pool4 = residual_block(res4, output_channels=filter_num*64,  name='pool4')
     res5 = residual_block(pool4, output_channels=filter_num * 64)
     res5 = residual_block(res5, output_channels=filter_num * 64)
 
     atb5 = attention_block(res4, encoder_depth=1, name='atten1')
-    #up1 = layers.UpSampling3D(size=up_size)(res5)
-    up1 = layers.Conv3DTranspose(filter_num*64, (1,3,3), strides=up_size, padding='same', name='up1')(res5)
+    up1 = layers.UpSampling3D(size=up_size)(res5)
+    #up1 = layers.Conv3DTranspose(filter_num*64, (1,3,3), strides=up_size, padding='same', name='up1')(res5)
     merged1 = layers.concatenate([up1, atb5], axis=merge_axis)
 
     res5 = residual_block(merged1, output_channels=filter_num * 32)
     atb6 = attention_block(res3, encoder_depth=2, name='atten2')
-    up2 = layers.Conv3DTranspose(filter_num*32, (1,3,3), strides=up_size, padding='same', name='up2')(res5)
-    #up2 = layers.UpSampling3D(size=up_size)(res5)
+    #up2 = layers.Conv3DTranspose(filter_num*32, (1,3,3), strides=up_size, padding='same', name='up2')(res5)
+    up2 = layers.UpSampling3D(size=up_size)(res5)
     merged2 = layers.concatenate([up2, atb6], axis=merge_axis)
 
     res6 = residual_block(merged2, output_channels=filter_num * 16)
     atb7 = attention_block(res2, encoder_depth=3, name='atten3')
-    up3 = layers.Conv3DTranspose(filter_num*16, (1,3,3), strides=up_size, padding='same', name='up3')(res6)
-    #up3 = layers.UpSampling3D(size=up_size)(res6)
+    #up3 = layers.Conv3DTranspose(filter_num*16, (1,3,3), strides=up_size, padding='same', name='up3')(res6)
+    up3 = layers.UpSampling3D(size=up_size)(res6)
     merged3 = layers.concatenate([up3, atb7], axis=merge_axis)
 
     res7 = residual_block(merged3, output_channels=filter_num * 8)
     atb8 = attention_block(res1, encoder_depth=4, name='atten4')
-    up4 = layers.Conv3DTranspose(filter_num*8, (1,3,3), strides=up_size, padding='same', name='up4')(res7)   
-    #up4 = layers.UpSampling3D(size=up_size)(res7)
+    #up4 = layers.Conv3DTranspose(filter_num*8, (1,3,3), strides=up_size, padding='same', name='up4')(res7)   
+    up4 = layers.UpSampling3D(size=up_size)(res7)
     merged4 = layers.concatenate([up4, atb8], axis=merge_axis)
 
     res8 = residual_block(merged4, output_channels=filter_num * 4)
-    #up = layers.UpSampling3D(size=up_size)(res8)
-    up = layers.Conv3DTranspose(filter_num*4, (1,3,3), strides=up_size, padding='same', name='up5')(res8)    
+    up = layers.UpSampling3D(size=up_size)(res8)
+    #up = layers.Conv3DTranspose(filter_num*4, (1,3,3), strides=up_size, padding='same', name='up5')(res8)    
     merged = layers.concatenate([up, conv1], axis=merge_axis)
 
     conv9 = layers.Conv3D(filter_num * 4, (1,3,3), padding='same', use_bias=False)(merged)
@@ -166,7 +166,6 @@ def RA_UNET(inputs):
 
 def UNET(inputs, filters = 32, size=4):
     x = inputs['dat']
-
     encoder_block = []
     filter_start = 4
     #encoder_block

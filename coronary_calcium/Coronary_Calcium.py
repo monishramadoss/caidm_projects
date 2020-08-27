@@ -29,7 +29,7 @@ def train():
         save_best_only=True)
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs")
-    model = UNET(inputs, 32, 4)
+    model = dense_unet_andrew(inputs)
     model.compile(optimizer=optimizers.Adam(learning_rate=2e-5, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
             'lbl': custom.sce(weights=None)

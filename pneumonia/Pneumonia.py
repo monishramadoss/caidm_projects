@@ -23,47 +23,53 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from jarvis.train import datasets, custom
 from jarvis.train.client import Client
 from jarvis.utils.general import overload, tools as jtools
+from jarvis.utils.db import DB
+from model import *
 
-from model import RA_UNET
-
-paths = datasets.download(name='ct/pna')
-path = '{}/data/ymls/client.yml'.format(paths['code'])
-print(path)
+datasets.download(name='ct/pna')
 
 @overload(Client)
 def preprocess(self, arrays, **kwargs):   
-    lng = arrays['xs']['lng']
-    pna = arrays['ys']['pna']
-    dat = arrays['xs']['dat']
-    #norm = np.linalg.norm(dat)
-    #dat = dat/norm
-    arrays['xs']['lng'] = lng.astype(np.float32)    
-    arrays['xs']['dat'] = dat.astype(np.float32)
-    arrays['ys']['pna'] = pna.astype(np.int64)
-
+    msk = np.zeros(arrays['ys']['pna'].shape)
+    msk[arrays['xs']['lng'] > 0] = 1
+    arrays['xs']['dat'] *= arrays['xs']['lng']
+    #arrays['xs']['msk'] = msk 
+    arrays['ys']['pna'] = arrays['ys']['pna'] > 0
     return arrays
 
-client = Client(path)
+
+path = '{}\\data\\ymls\\client.yml'.format(jtools.get_paths('ct/pna')['code'])
+client = Client('./client.yml')
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
-xs, ys = next(gen_train)
-print(np.max(xs['dat']), np.min(xs['dat']))
 
-def dice_coef(y_true, y_pred):
-    smoothing = 1e-7
-    y_true_f = tf.keras.backend.flatten(y_true)
-    y_pred_f = tf.keras.backend.flatten(tf.keras.backend.argmax(y_pred))
-    y_pred_f = tf.cast(y_pred_f, y_true_f.dtype)
-    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
-    return (2. * intersection + smoothing) / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smoothing)
+def sce(weights=None, scale=1.0):
+    loss = losses.SparseCategoricalCrossentropy(from_logits=True)
+    def sce(y_true, y_pred):
+        return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
+    return sce
 
-def dice_coef_loss(y_true, y_pred):
-    dice = 1 - dice_coef(y_true[:,:,:,:,:], y_pred[:,:,:,:,:])    
-    return dice
+def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
+    def calc_dsc(y_true, y_pred):
+        true = tf.cast(y_true[..., 0] == cls, tf.float32)
+        pred = tf.nn.softmax(y_pred, axis=-1)[..., cls]
+        if weights is not None:
+            true = true * (weights[..., 0]) 
+            pred = pred * (weights[..., 0])
+        A = tf.math.reduce_sum(true * pred) * 2
+        B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
+        return (1 - (A / B)) * scale
+    return calc_dsc
 
-def train():
-    
+def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
+    l1 = dsc_soft(weights, beta, epsilon, cls)
+    l2 = sce(weights, alpha)
+    def calc_loss(y_true, y_pred):
+        return l2(y_true, y_pred) + l1(y_true, y_pred)
+    return calc_loss
+
+def train():    
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath='./ckp/',
         save_weights_only=True,
@@ -72,7 +78,6 @@ def train():
         save_best_only=True
     )
 
-
     tensorboard_callback = tf.keras.callbacks.TensorBoard(
         log_dir="./logs", 
         histogram_freq=1,
@@ -80,27 +85,21 @@ def train():
         write_graph=False
     )
 
-    def sce(weights, scale=1.0):
-        loss = losses.SparseCategoricalCrossentropy(from_logits=True)
-        def sce(y_true, y_pred):
-            return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
-        return sce
-
     model = RA_UNET(inputs)
     model.compile(
         optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
-            'pna': sce(inputs['lng'])
+            'pna': happy_meal(1.5, 0)
             },
         metrics={
-            'pna': ['accuracy', custom.dsc(weights=inputs['lng'])]
+            'pna': ['accuracy', custom.dsc()]
             }        
     )
 
     model.fit(
         x=gen_train,
-        epochs=30,
-        steps_per_epoch=2000,
+        epochs=100,
+        steps_per_epoch=600,
         validation_data=gen_valid,
         validation_steps=500,
         validation_freq=1,

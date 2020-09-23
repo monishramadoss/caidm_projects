@@ -10,15 +10,16 @@ Original file is located at
 # Commented out IPython magic to ensure Python compatibility.
 # % pip install -q jarvis-md
 # % pip install -q tensorflow-model-optimizationpi 
-
 import os
 import numpy as np
 import pandas as pd
+import datetime
 import tensorflow as tf
 from tensorflow import optimizers, losses
 from tensorflow.keras import Input
 #import tensorflow_addons as tfa
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+#tf.compat.v1.disable_eager_execution()
 
 from jarvis.train import datasets, custom
 from jarvis.train.client import Client
@@ -26,17 +27,22 @@ from jarvis.utils.general import overload, tools as jtools
 from jarvis.utils.db import DB
 from model import *
 
+log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+if(not os.path.isdir(log_dir)):
+    os.makedirs(log_dir)
+
 datasets.download(name='ct/pna')
 
 @overload(Client)
 def preprocess(self, arrays, **kwargs):   
-    msk = np.zeros(arrays['ys']['pna'].shape)
-    msk[arrays['xs']['lng'] > 0] = 1
-    arrays['xs']['dat'] *= arrays['xs']['lng']
-    #arrays['xs']['msk'] = msk 
-    arrays['ys']['pna'] = arrays['ys']['pna'] > 0
+    msk = np.zeros(arrays['xs']['dat'].shape)
+    lung = arrays['xs']['lng'] > 0
+    pna =  arrays['ys']['pna'] > 0
+    msk[lung] = 1
+    msk[pna] = 5
+    arrays['xs']['lng'] = msk   
+    arrays['xs']['dat'] *= lung
     return arrays
-
 
 path = '{}\\data\\ymls\\client.yml'.format(jtools.get_paths('ct/pna')['code'])
 client = Client('./client.yml')
@@ -44,83 +50,82 @@ gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
 
+
 def sce(weights=None, scale=1.0):
     loss = losses.SparseCategoricalCrossentropy(from_logits=True)
+    @tf.function
     def sce(y_true, y_pred):
         return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
     return sce
 
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
-    def calc_dsc(y_true, y_pred):
+    @tf.function
+    def dsc(y_true, y_pred):
         true = tf.cast(y_true[..., 0] == cls, tf.float32)
         pred = tf.nn.softmax(y_pred, axis=-1)[..., cls]
         if weights is not None:
-            true = true * (weights[..., 0]) 
-            pred = pred * (weights[..., 0])
+            true = true * (weights[...]) 
+            pred = pred * (weights[...])
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return (1 - (A / B)) * scale
-    return calc_dsc
+        return  (A / B) * scale
+    return dsc
 
 def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
-    l1 = dsc_soft(weights, beta, epsilon, cls)
     l2 = sce(weights, alpha)
+    #l1 = dsc_soft(weights, beta, epsilon, cls)
+    @tf.function
     def calc_loss(y_true, y_pred):
-        return l2(y_true, y_pred) + l1(y_true, y_pred)
+        return l2(y_true, y_pred) #+ beta - l1(y_true, y_pred)
     return calc_loss
 
-def train():    
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        filepath='./ckp/',
-        save_weights_only=True,
-        monitor='val_accuracy',
-        mode='max',
-        save_best_only=True
-    )
 
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(
-        log_dir="./logs", 
+def train():    
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='./ckp/', save_weights_only=True)
+
+    tensorboard_callback = tf.keras.callbacks.TensorBoard( 
+        log_dir,       
         histogram_freq=1,
         write_images=True,
-        write_graph=False
+        write_graph=True,
+        profile_batch=0, 
     )
 
-    model = RA_UNET(inputs)
+    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
+
+    model = UNET(inputs, filters=32, size=-1, fs=1)
+    dot_img_file = './model.png'
+    tf.keras.utils.plot_model(model, to_file=dot_img_file, show_shapes=True)
     model.compile(
-        optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
-        loss={
-            'pna': happy_meal(1.5, 1)
-            },
-        metrics={
-            'pna': ['accuracy', custom.dsc()]
-            }        
+        optimizer=optimizers.Adam(learning_rate=3e-4),
+        loss={'pna': happy_meal(1, 0.5, weights=inputs['lng'])},
+        metrics = {'pna': dsc_soft(cls=1, weights=inputs['lng'])},
+        experimental_run_tf_function=False
     )
+
+    client.load_data_in_memory()
 
     model.fit(
         x=gen_train,
         epochs=100,
-        steps_per_epoch=600,
+        steps_per_epoch=400,
         validation_data=gen_valid,
-        validation_steps=500,
-        validation_freq=1,
-        callbacks=[tensorboard_callback, model_checkpoint_callback]
+        validation_steps=100,
+        validation_freq=5,
+        callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]        
     )
 
+    _, accuracy = model.evaluate(gen_valid, steps=600)
+    return accuracy
 
 def test(model):
-    lung_seg = []
-    for x,y in test_valid:
-        logits = model.predict(x)
-        if type(logits) is dict:
-            logits = logits['pna'] 
-        lung_seg.append(dice(y['pna'][0], logits[0]))
-    
-    lung_seg = np.array(lung_seg)
-    print(lung_seg.mean())
+    pass
     
 if __name__ == "__main__":
     train()
-    pass
+
+    
     
 
 

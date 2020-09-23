@@ -1,193 +1,153 @@
 from tensorflow.keras import  Model, layers, backend
+import tensorflow as tf
 
-def conv_bn_relu(input, filters, kernel_size=3, stride=1, name=None):
-    x = layers.Conv3D(filters, (1, kernel_size, kernel_size), padding='same', strides=(1, stride, stride), name=name)(input)
-    x = layers.BatchNormalization()(x)
-    x = layers.Activation('relu')(x)
-    return x
+def multires_block(x, filter_count, alpha=1.67, name=None):
+    with tf.name_scope(name) as scope:
+        W = alpha*filter_count
+        f0 = int(W*0.167) + int(W*0.333) + int(W*0.5)
+        f1 = int(W*0.167)
+        f2 = int(W*0.333)
+        f3 = int(W*0.5)
 
-def residual_block(input, input_channels=None, output_channels=None, kernel_size=(1, 3, 3), stride=1, name='out', up=None):
-    """
-    full pre-activation residual block
-    https://arxiv.org/pdf/1603.05027.pdf
-    """
-    if output_channels is None:
-        output_channels = input.get_shape()[-1]
-    if input_channels is None:
-        input_channels = output_channels // 4
+        s1 = layers.Conv3D(f0, 1, activation=None, padding='same', name=scope+"_skip_conv_1", use_bias=False, kernel_initializer='he_uniform')(x)
+        s1 = layers.BatchNormalization()(s1)
+        
+        c1 = layers.Conv3D(f1, (1, 3, 3), padding='same', name=scope+"_conv_1", use_bias=False, kernel_initializer='he_uniform')(x)
+        c1 = layers.BatchNormalization()(c1)
+        c1 = layers.Activation('relu')(c1)
 
-    strides = (1, stride, stride)
 
-    x = layers.BatchNormalization()(input)
-    x = layers.Activation('relu')(x)
-    x = layers.Conv3D(input_channels, (1, 1, 1), use_bias=False)(x)
+        c2 = layers.Conv3D(f2, (1, 3, 3), padding='same', name=scope+"_conv_2", use_bias=False, kernel_initializer='he_uniform')(c1)
+        c2 = layers.BatchNormalization()(c2)
+        c2 = layers.Activation('relu')(c2)
 
-    x = layers.BatchNormalization()(x)
-    x = layers.Activation('relu')(x)
-    x = layers.Conv3D(input_channels, kernel_size, padding='same', strides=strides, use_bias=False)(x)
+        c3 = layers.Conv3D(f3, (1, 3, 3), padding='same', name=scope+"_conv_3", use_bias=False, kernel_initializer='he_uniform')(c2)
+        c3 = layers.BatchNormalization()(c3)
+        c3 = layers.Activation('relu')(c3)
 
-    x = layers.BatchNormalization()(x)
-    x = layers.Activation('relu')(x)
-    x = layers.Conv3D(output_channels, (1, 1, 1), padding='same', use_bias=False)(x)
+        cat = layers.Concatenate()([c1, c2, c3])
+        cat = layers.BatchNormalization()(cat)
+        out = layers.add([s1, cat])
+        out = layers.Activation('relu')(out)
+        out = layers.BatchNormalization()(out)
+        
+        
+    return out
+    
+def res_path(x, filter_count, length, name=None):
+    with tf.name_scope(name+'res_path') as scope:
+        s1 = layers.Conv3D(filter_count, 1, activation=None, padding='same', name=scope+"_skip_conv_1", use_bias=False, kernel_initializer='he_uniform')(x)
+        s1 = layers.BatchNormalization()(s1)
 
-    if input_channels != output_channels or stride != 1:
-        input = layers.Conv3D(output_channels, (1, 1, 1), padding='same', strides=strides, use_bias=False)(input)
-    if name == 'out':
-        x = layers.add([x, input])
-    else:
-        x = layers.add([x, input], name=name)
-    return x
+        c1 = layers.Conv3D(filter_count, (1, 3, 3), padding='same', name=scope+"_conv_0", use_bias=False, kernel_initializer='he_uniform')(x)
+        c1 = layers.BatchNormalization()(c1)
+        c1 = layers.Activation('relu')(c1)
+        
+        out = layers.add([s1, c1])
+        out = layers.Activation('relu')(out)
+        out = layers.BatchNormalization()(out)
+       
+        for i in range(1,length):
+            s1 = layers.Conv3D(filter_count, 1, activation=None, padding='same', use_bias=False, kernel_initializer='he_uniform')(s1)
+            s1 = layers.BatchNormalization()(s1)
+        
+            c1 = layers.Conv3D(filter_count, (1, 3, 3), padding='same', name=scope+"_conv_"+str(i), use_bias=False, kernel_initializer='he_uniform')(out)
+            c1 = layers.BatchNormalization()(c1)
+            c1 = layers.Activation('relu')(c1)
+        
+            out = layers.add([s1, c1])
+            out = layers.Activation('relu')(out)
+            out = layers.BatchNormalization()(out)
+        
+    return out
 
-def attention_block(input, input_channels=None, output_channels=None, encoder_depth=1, name='out'):
-    """
-    attention block
-    https://arxiv.org/abs/1704.06904
-    """
-    p = 1
-    t = 2
-    r = 1
 
-    if input_channels is None:
-        input_channels = input.get_shape()[-1]
-    if output_channels is None:
-        output_channels = input_channels
-    for i in range(p):
-        input = residual_block(input)
+def down_block(x, filter_count, length, name=None):
+    with tf.name_scope(name) as scope:
+        c1 = multires_block(x, filter_count, name=scope)
+        p1 = layers.MaxPooling3D(pool_size=(1, 2, 2), name=scope+"_pool_1")(c1)
+        c1 = res_path(c1, filter_count, length, name=name)
+    return p1, c1
 
-    output_trunk = input
-    for i in range(t):
-        output_trunk = residual_block(output_trunk, output_channels=output_channels)
+def bottleneck_block(x, filter_count, name=None):
+    with tf.name_scope(name) as scope:
+        c1 = multires_block(x, filter_count, name=scope)
+    return c1
 
-    output_soft_mask = layers.MaxPooling3D(pool_size=(1,2,2), padding='same')(input) 
 
-    for i in range(r):
-        output_soft_mask = residual_block(output_soft_mask)
+def up_block(x1, x2, filter_count, name=None):
+    with tf.name_scope(name) as scope:
+        u6 = layers.Conv3DTranspose(filter_count, (1, 2, 2), strides=(1, 2, 2), padding='same', name=scope+"_convT_1")(x1)
+       # u6 = layers.BatchNormalization()(u6)
+        u6 = layers.Concatenate()([u6, x2])
+        c1 = multires_block(u6, filter_count, name=scope)
+    return c1
+    
 
-    skip_connections = []
-    for i in range(encoder_depth - 1):
-        output_skip_connection = residual_block(output_soft_mask)
-        skip_connections.append(output_skip_connection)
-        output_soft_mask = layers.MaxPooling3D(pool_size=(1,2,2), padding='same')(output_soft_mask)
-        for _ in range(r):
-            output_soft_mask = residual_block(output_soft_mask)
-    skip_connections = list(reversed(skip_connections))
+def UNET(inputs, filters=32, size=4, fs=4):
+    #encode
+    e1, s1 = down_block(inputs['dat'], filters*fs, 4, 'en1')
+    e2, s2 = down_block(e1, 2*filters*fs, 3, 'en2')
+    e3, s3 = down_block(e2, 4*filters*fs, 2, 'en3')
+    e4, s4 = down_block(e3, 8*filters*fs, 1, 'en4')
+   
+    #bottlneck
+    b1 = bottleneck_block(e4, 16*filters*fs, 'bt1')
+    #b1 = bottleneck_block(b1, 16*filters*fs, 'bt2')
 
-    for i in range(encoder_depth - 1):
-        for _ in range(r):
-            output_soft_mask = residual_block(output_soft_mask)
-        output_soft_mask = layers.UpSampling3D(size=(1,2,2))(output_soft_mask)
-        output_soft_mask = layers.add([output_soft_mask, skip_connections[i]])
-
-    for i in range(r):
-        output_soft_mask = residual_block(output_soft_mask)
-
-    output_soft_mask = layers.UpSampling3D(size=(1,2,2))(output_soft_mask)
-    output_soft_mask = layers.Conv3D(output_trunk.get_shape()[-1], (1, 1, 1), use_bias=False)(output_soft_mask)
-    output_soft_mask = layers.Conv3D(output_trunk.get_shape()[-1], (1, 1, 1), use_bias=False)(output_soft_mask)
-    output_soft_mask = layers.Activation('sigmoid')(output_soft_mask)
-  
-
-    # Attention: (1 + output_soft_mask) * output_trunk
-    output = layers.Lambda(lambda x: x + 1)(output_soft_mask)
-    output = layers.Multiply()([output, output_trunk])  #
-
-    # Last Residual Block
-    for i in range(p):
-        output = residual_block(output, name=name + str(i))
-
-    return output
-
-def build_res_atten_unet_3d(x, filter_num=32, merge_axis=-1, pool_size=(1, 2, 2)
-                            , up_size=(1, 2, 2)):
-    data = x
-    conv1 = layers.Conv3D(filter_num * 4, 3, padding='same', use_bias=False)(data)
-    conv1 = layers.BatchNormalization()(conv1)
-    conv1 = layers.Activation('relu')(conv1)
-
-    pool = layers.MaxPooling3D(pool_size=pool_size)(conv1)
-    pool = residual_block(pool, output_channels=filter_num * 4, name='pool')
-    res1 = residual_block(pool, output_channels=filter_num * 4)
-
-    pool1 = layers.MaxPooling3D(pool_size=pool_size)(res1)
-    pool1 = residual_block(pool1, output_channels=filter_num*8, name='pool1')
-    res2 = residual_block(pool1, output_channels=filter_num * 8)
-
-    pool2 = layers.MaxPooling3D(pool_size=pool_size)(res2)
-    pool2 = residual_block(res2, output_channels=filter_num*16,  name='pool2')
-    res3 = residual_block(pool2, output_channels=filter_num * 16)
-
-    pool3 = layers.MaxPooling3D(pool_size=pool_size)(res3)
-    pool3 = residual_block(res3, output_channels=filter_num*32,  name='pool3')
-    res4 = residual_block(pool3, output_channels=filter_num * 32)
-
-    pool4 = layers.MaxPooling3D(pool_size=pool_size)(res4)
-    pool4 = residual_block(res4, output_channels=filter_num*64,  name='pool4')
-    res5 = residual_block(pool4, output_channels=filter_num * 64)
-    res5 = residual_block(res5, output_channels=filter_num * 64)
-
-    atb5 = attention_block(res4, encoder_depth=1, name='atten1')
-    up1 = layers.UpSampling3D(size=up_size)(res5)
-    #up1 = layers.Conv3DTranspose(filter_num*64, (1,3,3), strides=up_size, padding='same', name='up1')(res5)
-    merged1 = layers.concatenate([up1, atb5], axis=merge_axis)
-
-    res5 = residual_block(merged1, output_channels=filter_num * 32)
-    atb6 = attention_block(res3, encoder_depth=2, name='atten2')
-    #up2 = layers.Conv3DTranspose(filter_num*32, (1,3,3), strides=up_size, padding='same', name='up2')(res5)
-    up2 = layers.UpSampling3D(size=up_size)(res5)
-    merged2 = layers.concatenate([up2, atb6], axis=merge_axis)
-
-    res6 = residual_block(merged2, output_channels=filter_num * 16)
-    atb7 = attention_block(res2, encoder_depth=3, name='atten3')
-    #up3 = layers.Conv3DTranspose(filter_num*16, (1,3,3), strides=up_size, padding='same', name='up3')(res6)
-    up3 = layers.UpSampling3D(size=up_size)(res6)
-    merged3 = layers.concatenate([up3, atb7], axis=merge_axis)
-
-    res7 = residual_block(merged3, output_channels=filter_num * 8)
-    atb8 = attention_block(res1, encoder_depth=4, name='atten4')
-    #up4 = layers.Conv3DTranspose(filter_num*8, (1,3,3), strides=up_size, padding='same', name='up4')(res7)   
-    up4 = layers.UpSampling3D(size=up_size)(res7)
-    merged4 = layers.concatenate([up4, atb8], axis=merge_axis)
-
-    res8 = residual_block(merged4, output_channels=filter_num * 4)
-    up = layers.UpSampling3D(size=up_size)(res8)
-    #up = layers.Conv3DTranspose(filter_num*4, (1,3,3), strides=up_size, padding='same', name='up5')(res8)    
-    merged = layers.concatenate([up, conv1], axis=merge_axis)
-
-    conv9 = layers.Conv3D(filter_num * 4, (1,3,3), padding='same', use_bias=False)(merged)
-    conv9 = layers.BatchNormalization()(conv9)
-    conv9 = layers.Activation('relu')(conv9)
-    return conv9
-
-def RA_UNET(inputs):
-    x = build_res_atten_unet_3d(inputs['dat'])
+    #decode
+    u6 = up_block(b1, s4, 8*filters*fs, 'de1')
+    u7 = up_block(u6, s3, 4*filters*fs, 'de2')
+    u8 = up_block(u7, s2, 2*filters*fs, 'de3')
+    u9 = up_block(u8, s1, filters*fs, 'de4')
+    
+    out = layers.Conv3D(2, (1,1,1), activation=tf.keras.activations.sigmoid, padding="same", use_bias=False, kernel_initializer='he_uniform')(u9)
+    out = layers.BatchNormalization(name='pna')(out)
     logits = {}
-    logits['pna'] = layers.Conv3D(2, (1,3,3), padding="same", name='pna', use_bias=False)(x)
+    logits['pna'] = out
     return Model(inputs, logits)
 
-def UNET(inputs, filters = 32, size=4):
+
+def UNET3(inputs, filters=32, size=4, fs=1.5):
     x = inputs['dat']
-    encoder_block = []
-    filter_start = 4
-    #encoder_block
-    for en in range(size):
-        x = conv_bn_relu(x, filters * filter_start, name='en_'+str(en))
-        x = conv_bn_relu(x, filters * filter_start)        
-        x = conv_bn_relu(x, filters * filter_start, stride=2)
-        filter_start *= 2
-        encoder_block.append(x)
+    #encode
+    e0, s0 = down_block(x, 2*filters*fs, 'x00')
+    e1, s1 = down_block(e0, 4*filters*fs, 'x10')
+    e2, s2 = down_block(e1, 8*filters*fs, 'x20')
+    e3, s3 = down_block(e2, 16*filters*fs, 'x30')
+   
+    
+    #bottlneck
+    b1 = bottleneck_block(e3, 32*filters*fs, 'x40')
+    b1 = bottleneck_block(b1, 32*filters*fs, 'x41')
 
-    x = conv_bn_relu(x, filters * filter_start)
-    x = conv_bn_relu(x, filters * filter_start)
+    #transition layers    
+    b2_6 = up_block(s3, s2, 8*filters*fs, 'x21')
+    
 
-    for de in range(size):
-        skip = encoder_block.pop(-1)
-        x = layers.concatenate([skip, x])
-        x = conv_bn_relu(x, filters * filter_start, name='de_'+str(de))
-        x = conv_bn_relu(x, filters * filter_start)
-        x = layers.UpSampling3D(size=(1,2,2))(x)
-        filter_start = filter_start // 2
+    b1_1_12 = up_block(s2, s1, 4*filters*fs, 'x11')
+    b1_2_7 = up_block(b2_6, s1+b1_1_12, 4*filters*fs, 'x12')
 
+    
+    b0_1_02 = up_block(s1, s0, 2*filters*fs, 'x01')
+    b0_2_03 = up_block(b1_1_12, s0 + b0_1_02, 2*filters*fs, 'x02')
+    b0_3_8 = up_block(b1_2_7, s0 + b0_2_03 + b0_1_02, 2*filters*fs, 'x03')
+
+
+    #decode
+    u5 = up_block(b1, s3, 16*filters*fs, 'x31')
+    u6 = up_block(u5 ,s2 + b2_6, 8*filters*fs, 'x22')
+    u7 = up_block(u6, s1 + b1_2_7 + b1_1_12, 4*filters*fs, 'x13')
+    u8 = up_block(u7, s0 + b0_3_8 + b0_2_03 + b0_1_02, 2*filters*fs, 'x04')
+    
+    b5_0 = bottleneck_block(s0, 4*filters*fs, 'x50')
+    b6_0 = bottleneck_block(b5_0, 8*filters*fs, 'x60')
+    b7_0 = bottleneck_block(b6_0, 16*filters*fs, 'x70')
+    b8_0 = bottleneck_block(b7_0, 2*filters*fs, 'x80')
+    b9_0 = bottleneck_block(b8_0, 2*filters*fs, 'x90')
+   
+    b9 = bottleneck_block(b9_0 + u8 + b0_3_8 + b0_2_03 + b0_1_02, filters, 'xl0')
+    
     logits = {}
-    logits['pna'] = layers.Conv3D(2, (1,3,3), padding="same", name='pna', use_bias=False)(x)
+    logits['pna'] = layers.Conv3D(2, (1,3,3), activation=tf.keras.activations.sigmoid, padding="same", name='pna')(b9)
     return Model(inputs, logits)
-

@@ -1,0 +1,43 @@
+_id: 
+  project: ct/pna
+  version: null
+_db: /data/ymls/db-pub-sum.yml 
+batch:
+  size: 4
+  fold: 0 
+  sampling:
+    cohort-pna: 0.7
+    cohort-lng: 0.3
+specs:
+  tiles: [true, false, false, false]
+  xs:
+    dat:
+      dtype: float32
+      loads: dat-crp 
+      norms: 
+        clip:
+          max: +256
+          min: -1024
+        scale: 128
+        shift: 0 
+      shape: [1, 256, 256, 1]
+    lng:
+      dtype: float32
+      loads: lng-crp 
+      norms: null
+      shape: [1, 256, 256, 1]
+    msk:
+      dtype: float32
+      loads: null
+      norms: null
+      shape: [1, 256, 256, 1]
+
+  ys:
+    pna:
+      dtype: uint8
+      loads: pna-crp 
+      norms:
+        clip:
+          max: 1
+          min: 0
+      shape: [1, 256, 256, 1]

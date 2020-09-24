@@ -1,0 +1,31 @@
+_id:
+  project: ct/structseg 
+  version: null 
+_db: /data/ymls/db-sum.yml 
+batch:
+  fold: 0 
+  size: 4
+  sampling:
+    cohort-heart: 0.4
+    cohort-bg: 0.6
+specs:
+  tiles: [true, false, false, false]
+  xs:
+    dat:
+      dtype: float32
+      loads: dat-256
+      norms:
+        clip:
+          max: +256
+          min: -1024
+        scale: 128 
+        shift: 0 
+      shape: [1, 256, 256, 1]
+  ys:
+    lbl:
+      dtype: uint8
+      loads: lbl-256 
+      norms:
+        mapping:
+          3: 1
+      shape: [1, 256, 256, 1]

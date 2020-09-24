@@ -61,9 +61,12 @@ def train():
         monitor='val_dcs',
         mode='max',
         save_best_only=True)
-
+    
+    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs")
-    model = andrew_NN(inputs)
+    
+    model = andrew_NN_2(inputs)
     model.compile(optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
             'lbl': happy_meal(1.0, 0.5)

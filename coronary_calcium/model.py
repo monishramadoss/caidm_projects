@@ -15,7 +15,7 @@ def UNET(inputs, filters = 32, size=4):
     for en in range(size):
         x = conv_bn_relu(x, filters * filter_start, name='en_'+str(en))
         x = conv_bn_relu(x, filters * filter_start)        
-        x = conv_bn_relu(x, filters * filter_start, stride=2)
+        x = layers.MaxPooling3D(pool_size=(1,2,2))(x)
         filter_start *= 2
         encoder_block.append(x)
 
@@ -41,7 +41,7 @@ def dense_unet_andrew(inputs):
     #Define model#
     # Define kwargs dictionary#
     kwargs = {
-    'kernel_size': (1, 3,3),
+    'kernel_size': (1,3,3),
     'padding': 'same',
     } #zeros, ones, golorit_uniform
 
@@ -104,6 +104,7 @@ def dense_unet_andrew(inputs):
     logits = {}
     logits['lbl'] = layers.Conv3D(filters=2, name='lbl', **kwargs)(TU5)
     model = Model(inputs=inputs, outputs=logits)
+
     return model
 
 def andrew_NN(inputs):
@@ -147,11 +148,6 @@ def andrew_NN(inputs):
     #Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     
-    '''print("Input Shape: ", inputs.shape)
-                TD1 = conv2(10,inputs) #basic convolution of stride 2, no maxpool.
-                print("TD Shape: ", TD1.shape)
-                DB1 = dense_block(10,TD1)
-                print("Dense Block Shape: ",DB1.shape )'''
     TD1 = td_block(10,10, inputs['dat'],0)
     TD2 = td_block(15,10,TD1,1)
     TD3 = td_block(20,15,TD2,2)
@@ -164,6 +160,6 @@ def andrew_NN(inputs):
     TU4 = tu_block(10,15,TU3,TD1,1)
     TU5 = tran2(1, TU4) 
     logits = {}
-    logits['lbl'] = layers.Conv3D(filters = 2, name='lbl',  **kwargs)(TU5)
+    logits['lbl'] = layers.Conv3D(filters = 2, name='lbl', **kwargs)(TU5)
     model = Model(inputs=inputs, outputs=logits )
     return model

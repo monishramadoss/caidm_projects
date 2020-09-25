@@ -34,120 +34,129 @@ def multires_block(x, filter_count, alpha=1.67, name=None):
         
     return out
     
-def res_path(x, filter_count, length, name=None):
-    with tf.name_scope(name+'res_path') as scope:
-        s1 = layers.Conv3D(filter_count, 1, activation=None, padding='same', name=scope+"_skip_conv_1", use_bias=False, kernel_initializer='he_uniform')(x)
-        s1 = layers.BatchNormalization()(s1)
 
-        c1 = layers.Conv3D(filter_count, (1, 3, 3), padding='same', name=scope+"_conv_0", use_bias=False, kernel_initializer='he_uniform')(x)
-        c1 = layers.BatchNormalization()(c1)
-        c1 = layers.Activation('relu')(c1)
-        
-        out = layers.add([s1, c1])
-        out = layers.Activation('relu')(out)
-        out = layers.BatchNormalization()(out)
-       
-        for i in range(1,length):
-            s1 = layers.Conv3D(filter_count, 1, activation=None, padding='same', use_bias=False, kernel_initializer='he_uniform')(s1)
-            s1 = layers.BatchNormalization()(s1)
-        
-            c1 = layers.Conv3D(filter_count, (1, 3, 3), padding='same', name=scope+"_conv_"+str(i), use_bias=False, kernel_initializer='he_uniform')(out)
-            c1 = layers.BatchNormalization()(c1)
-            c1 = layers.Activation('relu')(c1)
-        
-            out = layers.add([s1, c1])
-            out = layers.Activation('relu')(out)
-            out = layers.BatchNormalization()(out)
-        
-    return out
-
-
-def down_block(x, filter_count, length, name=None):
-    with tf.name_scope(name) as scope:
-        c1 = multires_block(x, filter_count, name=scope)
-        p1 = layers.MaxPooling3D(pool_size=(1, 2, 2), name=scope+"_pool_1")(c1)
-        c1 = res_path(c1, filter_count, length, name=name)
-    return p1, c1
-
-def bottleneck_block(x, filter_count, name=None):
-    with tf.name_scope(name) as scope:
-        c1 = multires_block(x, filter_count, name=scope)
-    return c1
-
-
-def up_block(x1, x2, filter_count, name=None):
-    with tf.name_scope(name) as scope:
-        u6 = layers.Conv3DTranspose(filter_count, (1, 2, 2), strides=(1, 2, 2), padding='same', name=scope+"_convT_1")(x1)
-       # u6 = layers.BatchNormalization()(u6)
-        u6 = layers.Concatenate()([u6, x2])
-        c1 = multires_block(u6, filter_count, name=scope)
-    return c1
+def dense_unet(inputs, filters=32):
+    '''Model Creation'''
+    #Define model#
+    # Define kwargs dictionary#
+    kwargs = {
+    'kernel_size': (1,3,3),
+    'padding': 'same',
+    'bias_initializer':'zeros'} #zeros, ones, golorit_uniform
+    #Define lambda functions#
+    conv = lambda x, filters, strides : layers.Conv3D(filters=int(filters), strides=(1, strides, strides), **kwargs)(x)
+    norm = lambda x : layers.BatchNormalization()(x)
+    relu = lambda x : layers.LeakyReLU()(x)
+    #Define stride-1, stride-2 blocks#
+    conv1 = lambda filters, x : relu(norm(conv(x, filters, strides=1)))
+    conv2 = lambda filters, x : relu(norm(conv(x, filters, strides=2)))
+    #Define single transpose#
+    tran = lambda x, filters, strides : layers.Conv3DTranspose(filters=int(filters), strides=(1,strides, strides), **kwargs)(x)
+    #Define transpose block#
+    tran2 = lambda filters, x : relu(norm(tran(x, filters, strides=2)))
+    concat = lambda a, b : layers.Concatenate()([a, b])
+    #Define Dense Block#
+    def dense_block(filters,input,DB_depth):
+        ext = 2+DB_depth
+        outside_layer = input
+        for _ in range(0,int(ext)):
+            inside_layer= conv1(filters, outside_layer)
+            outside_layer = concat(outside_layer,inside_layer)
+        return outside_layer
     
-
-def UNET(inputs, filters=32, size=4, fs=4):
-    #encode
-    e1, s1 = down_block(inputs['dat'], filters*fs, 4, 'en1')
-    e2, s2 = down_block(e1, 2*filters*fs, 3, 'en2')
-    e3, s3 = down_block(e2, 4*filters*fs, 2, 'en3')
-    e4, s4 = down_block(e3, 8*filters*fs, 1, 'en4')
-   
-    #bottlneck
-    b1 = bottleneck_block(e4, 16*filters*fs, 'bt1')
-    #b1 = bottleneck_block(b1, 16*filters*fs, 'bt2')
-
-    #decode
-    u6 = up_block(b1, s4, 8*filters*fs, 'de1')
-    u7 = up_block(u6, s3, 4*filters*fs, 'de2')
-    u8 = up_block(u7, s2, 2*filters*fs, 'de3')
-    u9 = up_block(u8, s1, filters*fs, 'de4')
+    def td_block(conv1_filters,conv2_filters,input,DB_depth):
+        TD = conv1(conv1_filters,conv2(conv2_filters,input))
+        DB = dense_block(conv1_filters,TD, DB_depth)
+        return DB
+    def tu_block(conv1_filters,tran2_filters,input,td_input,DB_depth):
+        TU = conv1(conv1_filters,tran2(tran2_filters,input))
+        C = concat(TU,td_input)
+        DB = dense_block(conv1_filters,C, DB_depth)
+        return DB
+    #Build Model#
+    # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     
-    out = layers.Conv3D(2, (1,1,1), activation=tf.keras.activations.sigmoid, padding="same", use_bias=False, kernel_initializer='he_uniform')(u9)
-    out = layers.BatchNormalization(name='pna')(out)
+    TD1 = td_block(filters*1,filters*1, inputs['dat'],0)
+    TD2 = td_block(filters*1.5,filters*1,TD1,1)
+    TD3 = td_block(filters*2,filters*1.5,TD2,2)
+    TD4 = td_block(filters*2.5,filters*2,TD3,3)
+    TD5 = td_block(filters*3,filters*2.5,TD4,4)
+    #print("TD5 shape: ", TD5.shape)
+    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4)
+    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3)
+    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2)
+    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1)
+    TU5 = tran2(filters*1, TU4) 
     logits = {}
-    logits['pna'] = out
-    return Model(inputs, logits)
+    logits['pna'] = layers.Conv3D(filters = 2, name='pna', **kwargs)(TU5)
+    model = Model(inputs=inputs, outputs=logits )
+    return model
 
 
-def UNET3(inputs, filters=32, size=4, fs=1.5):
-    x = inputs['dat']
-    #encode
-    e0, s0 = down_block(x, 2*filters*fs, 'x00')
-    e1, s1 = down_block(e0, 4*filters*fs, 'x10')
-    e2, s2 = down_block(e1, 8*filters*fs, 'x20')
-    e3, s3 = down_block(e2, 16*filters*fs, 'x30')
-   
+def UNETpp(inputs, filters=32, size=-1, fs=-1):
+    # --- Define kwargs dictionary
+    kwargs = {
+        'kernel_size': (1, 3, 3),
+        'padding': 'same'}
+
+    # --- Define lambda functions
+    conv = lambda x, filters, strides : layers.Conv3D(filters=int(filters), strides=strides, **kwargs)(x)
+    norm = lambda x : layers.BatchNormalization()(x)
+    relu = lambda x : layers.LeakyReLU()(x)
+    tran = lambda x, filters, strides : layers.Conv3DTranspose(filters=int(filters), strides=strides, **kwargs)(x)
+
+    # --- Define stride-1, stride-2 blocks
+    conv1 = lambda filters, x : relu(norm(conv(x, filters, strides=1)))
+    conv2 = lambda filters, x : relu(norm(conv(x, filters, strides=(1, 2, 2))))
+    tran2 = lambda filters, x : relu(norm(tran(x, filters, strides=(1, 2, 2))))
+
+    # --- Define pooling operations
+    # apool = lambda x, strides : layers.AveragePooling3D(pool_size=(1, 3, 3), strides=strides, padding='same')(x)
+    # mpool = lambda x, strides : layers.MaxPooling3D(pool_size=(1, 3, 3), strides=strides, padding='same')(x)
+    # avgpool = lambda x, strides : relu(norm(apool(x, strides)))
+    # maxpool = lambda x, strides : relu(norm(mpool(x, strides)))
+
+    stage_1 = filters
+    stage_2 = filters * 1.5
+    stage_3 = filters * 2
+    stage_4 = filters * 2.5
+    stage_5 = filters * 3
+
+    l00 = conv1(stage_1, conv1(stage_1, inputs['dat']))
+    l10 = conv1(stage_2, conv1(stage_2, conv2(stage_2, l00)))
+    l20 = conv1(stage_3, conv1(stage_3, conv2(stage_3, l10)))
+    l30 = conv1(stage_4, conv1(stage_4, conv2(stage_4, l20)))
+    l40 = conv1(stage_5, conv1(stage_5, conv2(stage_5, l30)))
+
+    # --- Inner bottom layer
+    l21 = tran2(stage_3, conv1(stage_3, conv2(stage_3, l20 + tran2(stage_3, l30))))
+
+    # --- Inner middle layer
+    l11 = conv1(stage_2, conv1(stage_2, conv1(stage_2, l10 + tran2(stage_2, l20))))
+    l12 = conv1(stage_2, conv1(stage_2, conv1(stage_2, l11 + l10 + tran2(stage_2, l21))))
+
+    # --- Inner top layer
+    l01 = conv1(stage_1, conv1(stage_1, conv1(stage_1, l00 + tran2(stage_1, l10))))
+    l02 = conv1(stage_1, conv1(stage_3, conv1(stage_1, l01 + l00 + tran2(stage_1, l11))))
+    l03 = conv1(stage_1, conv1(stage_4, conv1(stage_1, l02 + l01 + l00 + tran2(stage_1, l12))))
+
+    # --- Outer expanding layers
+    l31  = tran2(stage_3, conv1(stage_4, tran2(stage_4, l40) + l30))
+    l22  = tran2(stage_2, conv1(stage_3, l31  + l20 + l21))
+    l13 =  tran2(stage_1, conv1(stage_2, l22  + l10 + l12))
+    l04 =  conv1(stage_1, conv1(stage_1, l13  + l00 + l03))
+
+    # --- Deep CNN
+    l50 = conv1(stage_2, conv1(stage_2, conv1(stage_2, l00)))
+    l60 = conv1(stage_3, conv1(stage_3, conv1(stage_3, l50)))
+    l70 = conv1(stage_4, conv1(stage_4, conv1(stage_4, l60)))
+    lstage_4 = conv1(stage_1, conv1(stage_1, conv1(stage_1, l70)))
+    l90 = conv1(stage_1, conv1(stage_1, conv1(stage_1, lstage_4)))
     
-    #bottlneck
-    b1 = bottleneck_block(e3, 32*filters*fs, 'x40')
-    b1 = bottleneck_block(b1, 32*filters*fs, 'x41')
+    # Grouping output layer
+    loss_layer = conv1(stage_1, conv1(stage_1, l01 + l02 + l03 + l04 + l90))
 
-    #transition layers    
-    b2_6 = up_block(s3, s2, 8*filters*fs, 'x21')
-    
-
-    b1_1_12 = up_block(s2, s1, 4*filters*fs, 'x11')
-    b1_2_7 = up_block(b2_6, s1+b1_1_12, 4*filters*fs, 'x12')
-
-    
-    b0_1_02 = up_block(s1, s0, 2*filters*fs, 'x01')
-    b0_2_03 = up_block(b1_1_12, s0 + b0_1_02, 2*filters*fs, 'x02')
-    b0_3_8 = up_block(b1_2_7, s0 + b0_2_03 + b0_1_02, 2*filters*fs, 'x03')
-
-
-    #decode
-    u5 = up_block(b1, s3, 16*filters*fs, 'x31')
-    u6 = up_block(u5 ,s2 + b2_6, 8*filters*fs, 'x22')
-    u7 = up_block(u6, s1 + b1_2_7 + b1_1_12, 4*filters*fs, 'x13')
-    u8 = up_block(u7, s0 + b0_3_8 + b0_2_03 + b0_1_02, 2*filters*fs, 'x04')
-    
-    b5_0 = bottleneck_block(s0, 4*filters*fs, 'x50')
-    b6_0 = bottleneck_block(b5_0, 8*filters*fs, 'x60')
-    b7_0 = bottleneck_block(b6_0, 16*filters*fs, 'x70')
-    b8_0 = bottleneck_block(b7_0, 2*filters*fs, 'x80')
-    b9_0 = bottleneck_block(b8_0, 2*filters*fs, 'x90')
-   
-    b9 = bottleneck_block(b9_0 + u8 + b0_3_8 + b0_2_03 + b0_1_02, filters, 'xl0')
-    
+    # --- Create logits
     logits = {}
-    logits['pna'] = layers.Conv3D(2, (1,3,3), activation=tf.keras.activations.sigmoid, padding="same", name='pna')(b9)
+    logits['pna'] = layers.Conv3D(filters=2, name='pna', **kwargs)(loss_layer) 
     return Model(inputs, logits)

@@ -49,8 +49,6 @@ client = Client('./client.yml')
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
-
-
 def sce(weights=None, scale=1.0):
     loss = losses.SparseCategoricalCrossentropy(from_logits=True)
     @tf.function
@@ -94,7 +92,7 @@ def train():
     reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
     early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
 
-    model = UNET(inputs, filters=32, size=-1, fs=1)
+    model = dense_unet(inputs, filters=64)
     dot_img_file = './model.png'
     tf.keras.utils.plot_model(model, to_file=dot_img_file, show_shapes=True)
     model.compile(

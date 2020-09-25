@@ -17,10 +17,10 @@ gpus.autoselect(1)
 
 paths = datasets.download(name='ct/structseg')
 
-def create_hyper_csv(fname='./hyper.csv', overwrite=False):
+def create_hyper_csv(fname='./hyper.csv', overwrite=True):
     
-    #if os.path.exists(fname) and not overwrite:
-    #    return    
+    if os.path.exists(fname) and not overwrite:
+        return    
     df = {'output_dir': [], 'fold': [], 'batch_size': [], 'iterations': [], 'filters':[], 'alpha':[], 'beta':[]}
     for alpha in [1.0, 0.3]:
         for beta in [1.0, 0.3]:
@@ -39,9 +39,9 @@ def create_hyper_csv(fname='./hyper.csv', overwrite=False):
                
     # --- Save *.csv file
     df = pd.DataFrame(df)
-    df.to_csv(fname, index=False)
-    
+    df.to_csv(fname, index=False)    
     print('Created {} successfully'.format(fname))
+
 create_hyper_csv()
 p = params.load(csv='./hyper.csv', row=0)
 os.makedirs(p['output_dir'], exist_ok=True)
@@ -49,9 +49,8 @@ configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
 
 path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
-config = {''}
 print(path)
-client = Client(path)
+client = Client(path, configs=configs)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
@@ -97,6 +96,7 @@ def dense_unet(inputs, filters=32):
         C = concat(TU,td_input)
         DB = dense_block(conv1_filters,C, DB_depth)
         return DB
+    
     # Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     

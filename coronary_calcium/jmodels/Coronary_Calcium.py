@@ -23,7 +23,7 @@ def create_hyper_csv(fname='./hyper.csv', overwrite=False):
     df = {'output_dir': [], 'fold': [], 'batch_size': [], 'iterations': [], 'filters':[], 'alpha':[], 'beta':[]}
     for alpha in [1.0, 0.3]:
         for beta in [1.0, 0.3]:
-            for iterations in [400,800]:
+            for iterations in [100, 30]:
                 for filters in [16, 128]:
                     # --- Create exp
                     for fold in range(1):

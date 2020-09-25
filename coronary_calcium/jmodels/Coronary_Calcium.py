@@ -24,7 +24,7 @@ def create_hyper_csv(fname='./hyper.csv', overwrite=False):
     for alpha in [1.0, 0.3]:
         for beta in [1.0, 0.3]:
             for iterations in [400,800]:
-                for filters in [16, 32, 128]:
+                for filters in [16, 128]:
                     # --- Create exp01
                     for fold in range(1):
                         df['output_dir'].append('./exp01-{0}-{1}-{2}-{3}-{4}'.format(fold, filters, iterations, alpha, beta))

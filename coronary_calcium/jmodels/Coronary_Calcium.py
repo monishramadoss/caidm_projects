@@ -14,7 +14,7 @@ from jarvis.train.client import Client
 from jarvis.utils.general import overload, tools as jtools, gpus
 gpus.autoselect()
 
-paths = datasets.download(name='ct/structseg')
+paths = datasets.download(name='ct/structseg', path='../../data/')
 
 def create_hyper_csv(fname='./hyper.csv', overwrite=False):
     
@@ -46,7 +46,7 @@ p = params.load(csv='./hyper.csv', row=0)
 os.makedirs(p['output_dir'], exist_ok=True)
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
 
-path = '{}\\data\\ymls\\client-heart.yml'.format(jtools.get_paths('ct/structseg')['code'])
+path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
 print(path)
 client = Client(path)
 gen_train, gen_valid = client.create_generators()

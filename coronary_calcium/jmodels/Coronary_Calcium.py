@@ -181,8 +181,8 @@ def train():
     client.load_data_in_memory()
 
     model.fit(x=gen_train,
-        steps_per_epoch=p['iterations'],
-        epochs=50,
+        steps_per_epoch=100,
+        epochs=p['iterations'],
         validation_data=gen_valid,
         validation_steps=600,
         validation_freq=1,

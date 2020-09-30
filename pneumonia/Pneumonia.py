@@ -36,16 +36,17 @@ datasets.download(name='ct/pna')
 @overload(Client)
 def preprocess(self, arrays, **kwargs):   
     msk = np.zeros(arrays['xs']['dat'].shape)
-    lung = arrays['xs']['lng'] > 0
+    lng = arrays['xs']['lng'] > 0
     pna =  arrays['ys']['pna'] > 0
-    msk[lung] = 1
+    msk[lng] = 1
     msk[pna] = 5
     arrays['xs']['lng'] = msk   
-    arrays['xs']['dat'] *= lung
+    arrays['xs']['dat'] *= 1 * lng
     return arrays
 
 path = '{}\\data\\ymls\\client.yml'.format(jtools.get_paths('ct/pna')['code'])
-client = Client('./client.yml')
+configs = {'batch':{'fold':0, 'size':4}}
+client = Client(path, configs=configs)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
@@ -61,20 +62,22 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
     def dsc(y_true, y_pred):
         true = tf.cast(y_true[..., 0] == cls, tf.float32)
         pred = tf.nn.softmax(y_pred, axis=-1)[..., cls]
+
         if weights is not None:
-            true = true * (weights[...]) 
-            pred = pred * (weights[...])
-        A = tf.math.reduce_sum(true * pred) * 2
+            w = tf.cast(weights, tf.float32)     
+            true = true * w
+            pred = pred * w
+        A = tf.math.reduce_sum(true * pred) 
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return  (A / B) * scale
+        return  (A * 2.0/ B) * scale
     return dsc
 
 def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(weights, alpha)
-    #l1 = dsc_soft(weights, beta, epsilon, cls)
+    l2 = sce(None, alpha)
+    l1 = dsc_soft(weights, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
-        return l2(y_true, y_pred) #+ beta - l1(y_true, y_pred)
+        return l2(y_true, y_pred) - l1(y_true, y_pred)
     return calc_loss
 
 
@@ -92,11 +95,11 @@ def train():
     reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
     early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
 
-    model = dense_unet(inputs, filters=64)
+    model = dense_unet(inputs, filters=64, fs=2)
     dot_img_file = './model.png'
     tf.keras.utils.plot_model(model, to_file=dot_img_file, show_shapes=True)
     model.compile(
-        optimizer=optimizers.Adam(learning_rate=3e-4),
+        optimizer=optimizers.Adam(learning_rate=8e-4),
         loss={'pna': happy_meal(1, 0.5, weights=inputs['lng'])},
         metrics = {'pna': dsc_soft(cls=1, weights=inputs['lng'])},
         experimental_run_tf_function=False

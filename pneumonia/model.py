@@ -35,7 +35,7 @@ def multires_block(x, filter_count, alpha=1.67, name=None):
     return out
     
 
-def dense_unet(inputs, filters=32):
+def dense_unet(inputs, filters=32, fs=1):
     '''Model Creation'''
     #Define model#
     # Define kwargs dictionary#
@@ -57,7 +57,7 @@ def dense_unet(inputs, filters=32):
     concat = lambda a, b : layers.Concatenate()([a, b])
     #Define Dense Block#
     def dense_block(filters,input,DB_depth):
-        ext = 2+DB_depth
+        ext = 4+DB_depth
         outside_layer = input
         for _ in range(0,int(ext)):
             inside_layer= conv1(filters, outside_layer)
@@ -76,16 +76,16 @@ def dense_unet(inputs, filters=32):
     #Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     
-    TD1 = td_block(filters*1,filters*1, inputs['dat'],0)
-    TD2 = td_block(filters*1.5,filters*1,TD1,1)
-    TD3 = td_block(filters*2,filters*1.5,TD2,2)
-    TD4 = td_block(filters*2.5,filters*2,TD3,3)
-    TD5 = td_block(filters*3,filters*2.5,TD4,4)
-    #print("TD5 shape: ", TD5.shape)
-    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4)
-    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3)
-    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2)
-    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1)
+    TD1 = td_block(filters*1,filters*1, inputs['dat'],0*fs)
+    TD2 = td_block(filters*1.5,filters*1,TD1,1*fs)
+    TD3 = td_block(filters*2,filters*1.5,TD2,2*fs)
+    TD4 = td_block(filters*2.5,filters*2,TD3,3*fs)
+    TD5 = td_block(filters*3,filters*2.5,TD4,4*fs)
+
+    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4*fs)
+    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3*fs)
+    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2*fs)
+    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1*fs)
     TU5 = tran2(filters*1, TU4) 
     logits = {}
     logits['pna'] = layers.Conv3D(filters = 2, name='pna', **kwargs)(TU5)

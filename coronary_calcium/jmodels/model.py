@@ -15,39 +15,11 @@ from jarvis.utils.general import overload, tools as jtools, gpus
 gpus.autoselect(1)
 
 
-paths = datasets.download(name='ct/structseg')
+paths = datasets.download(name='ct/structseg', path='./data')
 
-def create_hyper_csv(fname='./hyper.csv', overwrite=True):
-    
-    if os.path.exists(fname) and not overwrite:
-        return    
-    df = {'output_dir': [], 'fold': [], 'batch_size': [], 'iterations': [], 'filters':[], 'alpha':[], 'beta':[]}
-    for alpha in [1.0, 0.3]:
-        for beta in [1.0, 0.3]:
-            for iterations in [100, 30]:
-                for filters in [16, 128]:
-                    # --- Create exp
-                    for fold in range(1):
-                        df['output_dir'].append('{0}/exp/exp-{1}-{2}-{3}-{4}-{5}'.format(os.getcwd(), fold, filters, iterations, int(alpha*10), int(beta*10)))
-                        df['fold'].append(fold)
-                        df['batch_size'].append(8)
-                        df['iterations'] = iterations
-                        df['filters'].append(filters)
-                        df['alpha'].append(alpha)
-                        df['beta'].append(beta)
-            
-               
-    # --- Save *.csv file
-    df = pd.DataFrame(df)
-    df.to_csv(fname, index=False)    
-    print('Created {} successfully'.format(fname))
-
-create_hyper_csv()
-p = params.load(csv='./hyper.csv', row=0)
-os.makedirs(p['output_dir'], exist_ok=True)
+p = params.load(csv='./hyper.csv', row=7)
 configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
-
 path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
 print(path)
 client = Client(path, configs=configs)
@@ -58,7 +30,7 @@ log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime(
 if(not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
 
-def dense_unet(inputs, filters=32):
+def dense_unet(inputs, filters=32, fs=1):
     '''Model Creation'''
     # Define kwargs dictionary
     kwargs = {
@@ -79,6 +51,7 @@ def dense_unet(inputs, filters=32):
     tran2 = lambda filters, x : relu(norm(tran(x, filters, strides=2)))
     concat = lambda a, b : layers.Concatenate()([a, b])
     # Define Dense Block#
+    
     def dense_block(filters,input,DB_depth):
         ext = 2+DB_depth
         outside_layer = input
@@ -100,16 +73,16 @@ def dense_unet(inputs, filters=32):
     # Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     
-    TD1 = td_block(filters*1,filters*1, inputs['dat'],0)
-    TD2 = td_block(filters*1.5,filters*1,TD1,1)
-    TD3 = td_block(filters*2,filters*1.5,TD2,2)
-    TD4 = td_block(filters*2.5,filters*2,TD3,3)
-    TD5 = td_block(filters*3,filters*2.5,TD4,4)
+    TD1 = td_block(filters*1,filters*1, inputs['dat'],0*fs)
+    TD2 = td_block(filters*1.5,filters*1,TD1,1*fs)
+    TD3 = td_block(filters*2,filters*1.5,TD2,2*fs)
+    TD4 = td_block(filters*2.5,filters*2,TD3,3*fs)
+    TD5 = td_block(filters*3,filters*2.5,TD4,4*fs)
     
-    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4)
-    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3)
-    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2)
-    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1)
+    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4*fs)
+    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3*fs)
+    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2*fs)
+    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1*fs)
     TU5 = tran2(filters*1, TU4) 
     logits = {}
     logits['lbl'] = layers.Conv3D(filters = 2, name='lbl', **kwargs)(TU5)
@@ -144,7 +117,7 @@ def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
     l1 = dsc_soft(None, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
-        return l2(y_true, y_pred) + beta - l1(y_true, y_pred)
+        return l2(y_true, y_pred) - l1(y_true, y_pred)
     return calc_loss
 
 @overload(Client)
@@ -154,7 +127,7 @@ def preprocess(self, arrays, **kwargs):
     return arrays
 
 def train():
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='./{}/ckp/'.format(p['output_dir']),
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='{}/ckp/'.format(p['output_dir']),
         save_weights_only=True,
         monitor='val_dsc',
         mode='max',
@@ -171,7 +144,7 @@ def train():
     #64 92%
     
     model = dense_unet(inputs, p['filters'])
-    model.compile(optimizer=optimizers.Adam(learning_rate=2e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+    model.compile(optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
         loss={
             'lbl': happy_meal(p['alpha'], p['beta'])
             },
@@ -184,9 +157,9 @@ def train():
 
     model.fit(x=gen_train,
         steps_per_epoch=100,
-        epochs=p['iterations'],
+        epochs=p['epochs'],
         validation_data=gen_valid,
-        validation_steps=600,
+        validation_steps=100,
         validation_freq=1,
         callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback])
     model.save(MODEL_NAME)
@@ -198,3 +171,6 @@ if __name__ == "__main__":
     
     
     train()
+    
+# go through xra pnuemonia model -> assess using the ground truth, they also have a ct, 
+# train on ct-public then test on ct-uci

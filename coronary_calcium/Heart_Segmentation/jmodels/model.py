@@ -133,7 +133,8 @@ def train():
     
     reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
     early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir,       
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+        log_dir,       
         histogram_freq=1,
         write_images=True,
         write_graph=True,
@@ -155,8 +156,8 @@ def train():
     client.load_data_in_memory()
 
     model.fit(x=gen_train,
-        steps_per_epoch=100,
         epochs=p['epochs'],
+        steps_per_epoch=200,
         validation_data=gen_valid,
         validation_steps=100,
         validation_freq=1,

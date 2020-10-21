@@ -78,33 +78,33 @@ def dense_unet(inputs, filters=32, fs=1):
     TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1*fs)
     TU5 = tran2(filters*1, TU4) 
     logits = {}
-    logits['pna'] = layers.Conv3D(filters = 2, name='pna', **kwargs)(TU5)
+    logits['pna-seg'] = layers.Conv3D(filters = 2, name='pna-seg', **kwargs)(TU5)
     model = Model(inputs=inputs, outputs=logits )
     return model
 
-paths = datasets.download(name='ct/pna')
-
+paths = datasets.download(name='xr/pna')
+print(paths)
 p = params.load(csv='./hyper.csv', row=7)
 configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
-path = '{}/data/ymls/client.yml'.format(paths['code'])
+path = '{}/data/ymls/client-pub-all-crp-seg.yml'.format(paths['code'])
 client = Client(path, configs=configs)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
-log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 if(not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
 
 @overload(Client)
 def preprocess(self, arrays, **kwargs):   
     msk = np.zeros(arrays['xs']['dat'].shape)
-    lng = arrays['xs']['lng'] > 0
-    pna =  arrays['ys']['pna'] > 0
+    lng = arrays['xs']['msk'] > 0
+    pna =  arrays['ys']['pna-seg'] > 0
     msk[lng] = 1
     msk[pna] = 5
-    arrays['xs']['lng'] = msk   
-    arrays['xs']['dat'] *= 1 * lng
+    arrays['xs']['msk'] = msk   
+    arrays['xs']['dat'] *= 1
     return arrays
 
 
@@ -157,10 +157,10 @@ def train():
     model.compile(
         optimizer=optimizers.Adam(learning_rate=8e-4),
         loss={
-            'pna': happy_meal(p['alpha'], p['beta'])
+            'pna-seg': happy_meal(p['alpha'], p['beta'], weights=inputs['msk'])
             },
         metrics={
-            'pna': dsc_soft()
+            'pna-seg': dsc_soft()
             },
         experimental_run_tf_function=False
     )

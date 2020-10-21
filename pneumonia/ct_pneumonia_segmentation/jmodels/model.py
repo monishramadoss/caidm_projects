@@ -58,8 +58,9 @@ def dense_unet(inputs, filters=32, fs=1):
         TD = conv1(conv1_filters,conv2(conv2_filters,input))
         DB = dense_block(conv1_filters,TD, DB_depth)
         return DB
-    def tu_block(conv1_filters,tran2_filters,input,td_input,DB_depth):
-        TU = conv1(conv1_filters,tran2(tran2_filters,input))
+    def tu_block(conv1_filters,tran2_filters,input,td_input,DB_depth, skip_DB_depth=1):
+        t1 = tran2(tran2_filters,input)
+        TU = dense_block(conv1_filters, t1, skip_DB_depth)
         C = concat(TU,td_input)
         DB = dense_block(conv1_filters,C, DB_depth)
         return DB
@@ -71,11 +72,11 @@ def dense_unet(inputs, filters=32, fs=1):
     TD3 = td_block(filters*2,filters*1.5,TD2,2*fs)
     TD4 = td_block(filters*2.5,filters*2,TD3,3*fs)
     TD5 = td_block(filters*3,filters*2.5,TD4,4*fs)
-
-    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4*fs)
-    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3*fs)
-    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2*fs)
-    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1*fs)
+    
+    TU1 = tu_block(filters*2.5,filters*3,TD5,TD4,4*fs, 1*fs)
+    TU2 = tu_block(filters*2,filters*2.5,TU1,TD3,3*fs, 2*fs)
+    TU3 = tu_block(filters*1.5,filters*2,TU2,TD2,2*fs, 3*fs)
+    TU4 = tu_block(filters*1,filters*1.5,TU3,TD1,1*fs, 4*fs)
     TU5 = tran2(filters*1, TU4) 
     logits = {}
     logits['pna'] = layers.Conv3D(filters = 2, name='pna', **kwargs)(TU5)
@@ -87,12 +88,12 @@ paths = datasets.download(name='ct/pna')
 p = params.load(csv='./hyper.csv', row=7)
 configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
-path = '{}/data/ymls/client.yml'.format(paths['code'])
+path = '{}/data/ymls/client-pub.yml'.format(paths['code'])
 client = Client(path, configs=configs)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
-log_dir = "logs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 if(not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
 
@@ -104,7 +105,7 @@ def preprocess(self, arrays, **kwargs):
     msk[lng] = 1
     msk[pna] = 5
     arrays['xs']['lng'] = msk   
-    arrays['xs']['dat'] *= 1 * lng
+    arrays['xs']['dat'] *= p['negative']
     return arrays
 
 
@@ -140,7 +141,11 @@ def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
 
 
 def train():    
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='./ckp/', save_weights_only=True)
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='{}/ckp/'.format(p['output_dir']),
+        save_weights_only=True,
+        monitor='val_dsc',
+        mode='max',
+        save_best_only=True)
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard( 
         log_dir,       
@@ -157,7 +162,7 @@ def train():
     model.compile(
         optimizer=optimizers.Adam(learning_rate=8e-4),
         loss={
-            'pna': happy_meal(p['alpha'], p['beta'])
+            'pna': happy_meal(p['alpha'], p['beta'], weights=inputs['lng'])
             },
         metrics={
             'pna': dsc_soft()
@@ -173,14 +178,11 @@ def train():
         steps_per_epoch=400,
         validation_data=gen_valid,
         validation_steps=100,
-        validation_freq=5,
+        validation_freq=1,
         callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]        
     )
-
-    _, accuracy = model.evaluate(gen_valid, steps=600)
     model.save(MODEL_NAME)
 
-    return accuracy
 
 def test(model):
     pass

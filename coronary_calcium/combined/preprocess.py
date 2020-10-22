@@ -29,8 +29,8 @@ def load_save_nii(secondary_path):
         label_match = np.count_nonzero(label[i] == 3)
         if label_match > 0:
             idxs.append(i)
-    data = data[idxs[0]-8:idxs[-1]+8, ...]
-    label = label[idxs[0]-8:idxs[-1]+8, ...]
+    #data = data[idxs[0]-8:idxs[-1]+8, ...]
+    #label = label[idxs[0]-8:idxs[-1]+8, ...]
 
     label = label==3
     label = label.astype(np.float32)

@@ -4,12 +4,13 @@ import shutil
 import numpy as np
 import cv2
 import pandas as pd
-import tensorflow as tf
-from tensorflow import optimizers, losses
-from tensorflow.keras import Input, Model, layers, backend
+from multiprocessing import Pool, freeze_support, cpu_count
 import datetime
 from tqdm import trange
 
+import tensorflow as tf
+from tensorflow import optimizers, losses
+from tensorflow.keras import Input, Model, layers, backend
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy import signal
@@ -18,9 +19,12 @@ from scipy import ndimage
 from scipy import interpolate
 import scipy.ndimage
 
-#import tensorflow_addons as tfa
+import warnings
+warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
+if os.name == "nt":
+    freeze_support()
+    
 from jarvis.train import custom, params
 from jarvis.utils.general import gpus
 gpus.autoselect(1)
@@ -45,16 +49,20 @@ if(not os.path.isdir(log_dir)):
     
 shutil.rmtree('./image')
 os.makedirs('./image')
-    
+
+t = np.linspace(-10, 10, 30)
+bump = np.exp(-0.1*t**2)
+kernel = bump[:, np.newaxis] * bump[np.newaxis, :]
+kernel = np.expand_dims(kernel, (0, -1))
+struct1 = ndimage.generate_binary_structure(4, 1)
+print(struct1.shape)
+def dilate(a, iter_count):
+    a = np.expand_dims(a, 1)
+    a = ndimage.binary_dilation(a, structure=struct1, iterations=iter_count)
+    a = np.squeeze(a, 1)
+    return a
 # Data
-def plaque_transform(cls, model=None):
-    t = np.linspace(-10, 10, 30)
-    bump = np.exp(-0.1*t**2)
-    kernel = bump[:, np.newaxis] * bump[np.newaxis, :]
-    kernel = np.expand_dims(kernel, (0, -1))
-    struct1 = ndimage.generate_binary_structure( 4, 1)
-    dilate = lambda a : ndimage.binary_dilation(a, structure=struct1, iterations=5)
-    
+def plaque_transform(cls, model=None):    
     def transform(data, label):
         data = data[1:-1]
         label = label[1:-1] 
@@ -63,7 +71,9 @@ def plaque_transform(cls, model=None):
             if np.count_nonzero(label[i] == cls):
                 idxs.append(i)
         if len(idxs) > 2:
-            data, label = data[idxs[0]:idxs[-1], ...], label[idxs[0]:idxs[-1], ...], 
+            data, label = data[idxs[0]:idxs[-1], ...], label[idxs[0]:idxs[-1], ...]
+            print(data.shape, label.shape)
+            label = dilate(label, 3)
             data = np.clip(data, -1024, 400) / 200
             data, label = np.expand_dims(data, (1)), np.expand_dims(label, (1))
             return data, label
@@ -78,7 +88,7 @@ def thoracic_transform():
     def transform(data, label):
         min = np.min(data)
         d, l = [], []
-        data = ndimage.zoom(data, (1, zoom, zoom), order=0)
+        data = ndimage.zoom(data, (1, zoom, zoom), order=3)
         label = ndimage.zoom(label, (1, zoom, zoom), order=0)
         
         shape = data.shape[-2]
@@ -90,6 +100,7 @@ def thoracic_transform():
         mask = (X - lx / 2) ** 2 + (Y - ly / 2) ** 2 > lx * ly / 4
         data[:,mask] = min
         label[:,mask] = 0
+        
         idxs = []
         for i in range(data.shape[0]):
             if np.count_nonzero(label[i] != 0):
@@ -97,42 +108,67 @@ def thoracic_transform():
         if len(idxs) > 2:
             data, label = data[idxs[0]:idxs[-1], ...], label[idxs[0]:idxs[-1], ...], 
             data = np.clip(data, -1024, 400) / 200  
+            label = np.clip(label, 0, 1)
+
             data, label = np.expand_dims(data, (1)), np.expand_dims(label, (1))
             return data, label
         return None, None
     return transform
 
+def pre_process_func(data_path, file, transform, save_images):
+    main_path = os.path.join(data_path, file)
+    d_path = glob.glob(os.path.join(main_path, "*cti.npy"))[0]
+    l_path = glob.glob(os.path.join(main_path, "*r.npy"))[0]
+    if transform == 'thoracic':
+        transform_fn = thoracic_transform()
+    elif transform == 'plaque':
+        transform_fn = plaque_transform(3)
+    else:
+        transform_fn = lambda x, y: x, y
+    data, label = transform_fn(np.load(d_path), np.load(l_path))
+    if data is not None:
+        if save_images:                
+            if not os.path.isdir('./image/{}'.format(data_path.split('/')[-1])):
+                os.makedirs('./image/{}'.format(data_path.split('/')[-1]))                
+            save_array('./image/{}'.format(data_path.split('/')[-1]), data, file+'_data_.gif')
+            save_array('./image/{}'.format(data_path.split('/')[-1]), label, file+'_label_.gif')
+            print("done with: {}".format(main_path))
+        return data , label
+    return None, None
 
-def data_process(data_path, batch_size=4, transform=None, train_percent=0.9, save_images=True):
-    data_array = None
-    label_array = None
-    count = 0
-    data_paths = os.listdir(data_path)
-    for f in range(len(data_paths)):#, desc='processing data files'):
-        file = data_paths[f]
-        main_path = os.path.join(data_path, file)
-        d_path = glob.glob(os.path.join(main_path, "*cti.npy"))[0]
-        l_path = glob.glob(os.path.join(main_path, "*r.npy"))[0]
-        data, label = transform(np.load(d_path), np.load(l_path))
-        if data is not None:
-            data_array = data if data_array is None else np.concatenate([data_array, data])               
-            label_array = label if label_array is None else np.concatenate([label_array, label])
-            if save_images:
-                
-                if not os.path.isdir('./image/{}'.format(data_path.split('/')[-1])):
-                    os.makedirs('./image/{}'.format(data_path.split('/')[-1]))
-                
-                save_array('./image/{}'.format(data_path.split('/')[-1]), data, file+'_data_.gif')
-                save_array('./image/{}'.format(data_path.split('/')[-1]), label, file+'_label_.gif')
+def pre_procss_func_wraper(args):
+    return pre_process_func(*args)
     
-    data_array = np.expand_dims(data_array, (1, -1)).astype(np.float32)
-    label_array = np.expand_dims(label_array, (1, -1))
+def data_process(data_path, batch_size=4, transform=None, train_percent=0.9, save_images=True):
+    pool = Pool(cpu_count()) 
+
+    count = 0
+    pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]
+    result = pool.map(pre_procss_func_wraper, pool_args)
+    data_array = result[0][0]
+    label_array = result[0][1]
+    
+    
+    for x, y in result:
+        if x is not None or y is not None:
+            data_array = np.concatenate([data_array, x])
+            label_array = np.concatenate([label_array, y])
+                
+    data_array = np.expand_dims(data_array, (-1)).astype(np.float32)
+    label_array = np.expand_dims(label_array, ( -1))
+    print(data_array.shape)
+    print(label_array.shape)
     assert(data_array.shape == label_array.shape)
     sz = data_array.shape[0]
-    train_dataset = tf.data.Dataset.from_tensor_slices((data_array[:int(sz*train_percent)], label_array[:int(sz*train_percent)])).shuffle(100).batch(batch_size)
-    test_dataset = tf.data.Dataset.from_tensor_slices((data_array[int(sz*train_percent):], label_array[int(sz*train_percent):])).batch(1)
-    return train_dataset, test_dataset
-
+    
+    train_dataset = tf.data.Dataset.from_tensor_slices(
+        (data_array[:int(sz*train_percent)], label_array[:int(sz*train_percent)])
+    ).shuffle(100).batch(batch_size)
+    test_dataset = tf.data.Dataset.from_tensor_slices(
+        (data_array[int(sz*train_percent):], label_array[int(sz*train_percent):])
+    ).batch(1)
+    
+    return train_dataset, test_dataset, 
 
 # MODEL
 def dense_unet(inputs, filters=32, fs=1):
@@ -158,7 +194,7 @@ def dense_unet(inputs, filters=32, fs=1):
     # Define Dense Block#
     
     def dense_block(filters,input,DB_depth):
-        ext = 2+DB_depth
+        ext = 4+DB_depth
         outside_layer = input
         for _ in range(0,int(ext)):
             inside_layer= conv1(filters, outside_layer)
@@ -196,9 +232,6 @@ def dense_unet(inputs, filters=32, fs=1):
 
 
 # LOSS
-
-
-
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
     @tf.function
     def dsc(y_true, y_pred):
@@ -230,13 +263,96 @@ def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
     return calc_loss
 
 # TRAIN LOOP
+def pre_train(train_data, test_data):
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='{}/ckp/'.format(p['output_dir']),
+        save_weights_only=True,
+        monitor='val_dsc',
+        mode='max',
+        save_best_only=True)
+    
+    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc', factor=0.8, patience=2, mode = "max", verbose = 1)
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+        log_dir,       
+        histogram_freq=1,
+        write_images=True,
+        write_graph=True,
+        profile_batch=0, 
+    )
+    
+    model = dense_unet({'dat':Input(shape=(1,512,512,1))}, p['filters1'], p['block_scale1'])
+    model.compile(
+        optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+        loss={
+            'lbl': happy_meal(p['alpha'], p['beta'])
+            },
+        metrics={
+            'lbl': dsc_soft()
+            }
+    )
+    
+    model.fit(x=train_data, 
+        epochs=2,
+        validation_data=test_data,
+        validation_freq=1,
+        callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback]
+    )  
 
+    model.save("{}/ckp/pre_train_model.hdf5".format(p['output_dir']))
+    return model
+
+@tf.function
+def train_step(model1, model2, x, y, T=None):
+    opt1 = optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    opt2 = optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    plaque_loss = happy_meal(p['gamma'], p['delta'])
+    thoracic_loss = happy_meal(p['alpha'], p['beta'])
+    
+    thoracic_mask = model1(x, training=False)
+    thoracic_mask = np.array([dilate(thoracic_mask[b,...], 10) for b in range(thoracic_mask.shape[0])])
+    
+    with tf.GradientTape() as tape:
+        plaque_mask = model2(x*thoracic_mask)
+        p_loss = plaque_loss(y, plaque_mask)
+    grads = tape.gradient(p_loss, model2.trainable_weights)
+    opt2.apply_gradeints(zip(grads, model2.trainable_weights)) 
+    
+    if T is not None:
+        with tf.GradientTape() as tape:
+            thoracic_logit = model1(T[0], training=True)
+            t_loss = thoracic_loss(T[1], thoracic_logit)
+        grads = tape.gradient(t_loss, model1.trainable_weights)
+        opt1.apply_gradients(zip(grads, model1.trainable_weights))
+
+    return p_loss, t_loss
+    
 def train():
-    thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', transform=thoracic_transform(),)
+    thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'], transform='thoracic')   
+    plaque_train, plaque_test  = data_process('./data/Plaque_Data', batch_size=p['batch_size'], transform='plaque')
     
+    print(type(thoracic_train))
+    thoracic_model = pre_train(thoracic_train, thoracic_test)
     
-    plaque_train, plaque_test  = data_process('./data/Plaque_Data', transform=plaque_transform(3))
+    plaque_model = dense_unet({'dat': Input(shape=(1, 512, 512, 1))}, p['filters2'], p['block_scale2'])
+    plaque_metric = dsc_soft()
     
-    
+    for epoch in range(p['epochs']):
+        for step, (x, y) in enumerate(plaque_train):
+            T = None #thoracic_train[step% len(thoracic_train)]
+            
+            p_loss, t_loss = train_step(thoracic_model, plaque_model, x, y, T)
+            if step % 50 == 0:
+                print("Plaque loss at step %d: %.2f" % (step, p_loss))
+                print("Thoracic loss at step %d: %.2f" % (step, t_loss))
+                              
+        for step, (x, y) in enumerate(plaque_test):
+            val_logits = plaque_model(x)
+            plaque_metric.update_state(y, val_logits)
+        val_acc = plaque_metric.result()
+        plaque_metric.reset_states()
+        
+        print("Valdiation acc: %.4f" % (float(val_acc), ))
+        
+                
 if __name__ == "__main__":
     train()

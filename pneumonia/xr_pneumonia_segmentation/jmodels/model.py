@@ -176,9 +176,9 @@ def train():
         validation_freq=5,
         callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]        
     )
-
-    _, accuracy = model.evaluate(gen_valid, steps=600)
+    
     model.save(MODEL_NAME)
+    _, accuracy = model.evaluate(gen_valid, steps=600)
 
     return accuracy
 
@@ -186,7 +186,7 @@ def test(model):
     pass
     
 if __name__ == "__main__":
-    train()
+    print(train())
 
     
     

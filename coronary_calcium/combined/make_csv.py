@@ -26,10 +26,10 @@ def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
         'delta':[]
     }
     
-    for alpha, beta in [(1.0, 0.3), (1.0, 1.0)]:
-        for gamma, delta in [(1.0, 0.3), (0.3, 1.0), (1.0, 1.0)]:
+    for alpha, beta in [(0.3, 1.0), (1.0, 1.0)]:
+        for gamma, delta in [(0.3, 1.0), (1.0, 1.0)]:
             for epochs in [100]:
-                for filters1, filters2 in [(10, 10), (32,32)]:
+                for filters1, filters2 in [(32,32)]:
                     for block_scale1, block_scale2 in [(1,1), (1,2)]:
                         for fold in range(1):
                             df['output_dir'].append('{0}/jmodels/exp/exp_{1}'.format(os.getcwd(), id) )

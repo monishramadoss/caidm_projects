@@ -29,9 +29,12 @@ def load_save_nii(secondary_path):
         label_match = np.count_nonzero(label[i] == 3)
         if label_match > 0:
             idxs.append(i)
-    #data = data[idxs[0]-8:idxs[-1]+8, ...]
-    #label = label[idxs[0]-8:idxs[-1]+8, ...]
-
+    sz = 12
+    
+    data = data[idxs[0]-sz:idxs[-1]+sz, ...]
+    label = label[idxs[0]-sz:idxs[-1]+sz, ...]
+    data = np.flip(data, axis=(2))
+    label = np.flip(label, axis=(2))
     label = label==3
     label = label.astype(np.float32)
     save_array('./image/', data, secondary_path.split('/')[-1]+'_data_.gif')
@@ -45,6 +48,6 @@ def load_save_nii(secondary_path):
 def load_thoracic_data(root_path: str = "./jmodels/data/Thoracic_Data") -> None:    
     pool = multiprocessing.Pool()
     pool.map(load_save_nii, [os.path.join(root_path, secondary_path) for secondary_path in os.listdir(root_path)])
-    
+    pool.join()
 if __name__ == '__main__':
     load_thoracic_data()

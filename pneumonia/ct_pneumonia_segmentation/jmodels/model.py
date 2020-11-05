@@ -131,8 +131,8 @@ def sce(weights=None, scale=1.0):
     return sce
 
 
-def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(None, alpha)
+def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
+    l2 = sce(weights, alpha)
     l1 = dsc_soft(None, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
@@ -141,8 +141,8 @@ def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
 
 
 def train():    
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='{}/ckp/'.format(p['output_dir']),
-        save_weights_only=True,
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath='{}/ckp/'.format(p['output_dir']),
         monitor='val_dsc',
         mode='max',
         save_best_only=True)

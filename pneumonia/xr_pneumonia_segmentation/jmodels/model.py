@@ -63,6 +63,7 @@ def dense_unet(inputs, filters=32, fs=1):
         C = concat(TU,td_input)
         DB = dense_block(conv1_filters,C, DB_depth)
         return DB
+    
     #Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
     
@@ -79,11 +80,10 @@ def dense_unet(inputs, filters=32, fs=1):
     TU5 = tran2(filters*1, TU4) 
     logits = {}
     logits['pna-seg'] = layers.Conv3D(filters = 2, name='pna-seg', **kwargs)(TU5)
-    model = Model(inputs=inputs, outputs=logits )
+    model = Model(inputs=inputs, outputs=logits)
     return model
 
 paths = datasets.download(name='xr/pna')
-print(paths)
 p = params.load(csv='./hyper.csv', row=7)
 configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
@@ -102,7 +102,7 @@ def preprocess(self, arrays, **kwargs):
     lng = arrays['xs']['msk'] > 0
     pna =  arrays['ys']['pna-seg'] > 0
     msk[lng] = 1
-    msk[pna] = 5
+    msk[pna] = 10
     arrays['xs']['msk'] = msk   
     arrays['xs']['dat'] *= 1
     return arrays
@@ -130,8 +130,8 @@ def sce(weights=None, scale=1.0):
     return sce
 
 
-def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(None, alpha)
+def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
+    l2 = sce(weights, alpha)
     l1 = dsc_soft(None, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
@@ -140,7 +140,12 @@ def happy_meal(alpha = 5, beta = 1, weights=None, epsilon=0.01, cls=1):
 
 
 def train():    
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath='./ckp/', save_weights_only=True)
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath='{}/ckp/'.format(p['output_dir']),          
+        monitor='val_dsc',
+        mode='max',
+        save_best_only=True)
+
 
     tensorboard_callback = tf.keras.callbacks.TensorBoard( 
         log_dir,       
@@ -165,28 +170,22 @@ def train():
         experimental_run_tf_function=False
     )
 
-    client.load_data_in_memory()
-
     model.fit(
         x=gen_train,
         epochs=p['epochs'],
         steps_per_epoch=400,
         validation_data=gen_valid,
         validation_steps=100,
-        validation_freq=5,
+        validation_freq=1,
         callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]        
     )
-    
     model.save(MODEL_NAME)
-    _, accuracy = model.evaluate(gen_valid, steps=600)
-
-    return accuracy
 
 def test(model):
     pass
     
 if __name__ == "__main__":
-    print(train())
+    train()
 
     
     

@@ -69,7 +69,7 @@ def plaque_transform(cls, model=None):
         idxs = []
         label = dilate(label, 2)
         data = np.clip(data, -1024, 400) / 200
-        label [label != 0] = 1
+        label[label != 0] = 1
         return np.expand_dims(data, (1)), np.expand_dims(label, (1))
     return transform
 
@@ -128,7 +128,7 @@ def pre_procss_func_wraper(args):
     return pre_process_func(*args)
     
 def data_process(data_path, batch_size=4, transform=None, train_percent=0.9, save_images=True):
-    pool = Pool(cpu_count()//2) 
+    pool = Pool(8) 
     pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]
     result = pool.map(pre_procss_func_wraper, pool_args)
     pool.join()
@@ -286,10 +286,8 @@ def _train(train_data, test_data, epochs, filters, block_scale, alpha, beta, che
 
     
 def train():
-    
-
-#     thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'], transform='thoracic', save_images=False)   
-#     thoracic_model = _train(thoracic_train, thoracic_test, 10, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'], transform='thoracic', save_images=False)   
+    thoracic_model = _train(thoracic_train, thoracic_test, 10, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
     
     plaque_train, plaque_test  = data_process('./data/Plaque_Data', batch_size=p['batch_size'], transform='plaque')        
     plaque_model = _train(plaque_train, plaque_test, p['epochs'], p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'zckp_2')

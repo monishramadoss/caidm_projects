@@ -3,7 +3,7 @@ import pandas as pd
 def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
     if os.path.exists(fname) and not overwrite:
         return    
-    id = 4
+    id = 0
     df = {'output_dir': [], 'fold': [], 'batch_size': [], 'epochs': [], 'filters':[], 'block_scale':[], 'alpha':[], 'beta':[]}
     for alpha, beta in [(1.0, 0.3), (0.3, 1.0), (1.0, 1.0)]:
         for epochs in [200]:

@@ -27,8 +27,11 @@ if os.name == "nt":
     freeze_support()
     
 from jarvis.train import custom, params
-from jarvis.utils.general import gpus
-gpus.autoselect(1)
+try:
+    from jarvis.utils.general import gpus
+    gpus.autoselect(1)
+except:
+    pass
 
 p = params.load(csv='./hyper.csv', row=0)
 os.makedirs(p['output_dir'], exist_ok=True)
@@ -45,9 +48,6 @@ def save_array(path, array, name):
     
 if(not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
-    
-shutil.rmtree('./image')
-os.makedirs('./image')
 
 t = np.linspace(-10, 10, 30)
 bump = np.exp(-0.1*t**2)
@@ -128,10 +128,13 @@ def pre_procss_func_wraper(args):
     return pre_process_func(*args)
     
 def data_process(data_path, batch_size=4, transform=None, train_percent=0.9, save_images=True):
-    pool = Pool(8) 
-    pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]
-    result = pool.map(pre_procss_func_wraper, pool_args)
-    pool.join()
+    if save_images:
+        shutil.rmtree('./image')
+        os.makedirs('./image')
+    pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]    
+    with Pool(8) as pool:
+        result = pool.map(pre_procss_func_wraper, pool_args)
+    
     data_array = result[0][0]
     label_array = result[0][1]
     for x, y in result:
@@ -281,16 +284,26 @@ def _train(train_data, test_data, epochs, filters, block_scale, alpha, beta, che
         callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback]
     )  
 
-    model.save(CHECKPOINT_PATH + "/model.hdf5")
+    model.save(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
     return model
 
-    
+def _eval(model, data, name=""):
+    eval_path = os.path.join(p['output_dir'], 'images')
+    if not os.path.isdir(eval_path):
+        os.makedirs(eval_path, exist_ok=True)
+    for i, d in enumerate(data):
+        logit = model.predict(d)
+        for b in range(logit.shape[0]):
+            print(logit[b].shape)
+        
 def train():
     thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'], transform='thoracic', save_images=False)   
     thoracic_model = _train(thoracic_train, thoracic_test, 10, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    plaque_train, plaque_test = data_process('./data/Plaque_Data', batch_size=p['batch_size'], transform='plaque', save_images=False)        
+    _eval(thoracic_model, plaque_train, 'plaque_train')
+    _eval(thoracic_model, placque_test, 'plaque_test')
     
-    plaque_train, plaque_test  = data_process('./data/Plaque_Data', batch_size=p['batch_size'], transform='plaque')        
-    plaque_model = _train(plaque_train, plaque_test, p['epochs'], p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'zckp_2')
+    #plaque_model = _train(plaque_train, plaque_test, p['epochs'], p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'ckp_2')
                    
 if __name__ == "__main__":
     train()

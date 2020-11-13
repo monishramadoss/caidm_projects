@@ -53,3 +53,5 @@ def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
     print('Created {} successfully'.format(fname))
 
 create_hyper_csv(overwrite=True)
+os.system('rm -rf "./scripts"')
+os.system('jarvis script -jmodels ./jmodels -name xr_pna_seg -output_dir "./scripts"')

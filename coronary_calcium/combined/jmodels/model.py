@@ -7,6 +7,8 @@ from multiprocessing import Pool, freeze_support
 
 import numpy as np
 import tensorflow as tf
+
+from tqdm import tqdm
 from scipy import ndimage
 from tensorflow import optimizers, losses
 from tensorflow.keras import Input, Model, layers
@@ -31,9 +33,14 @@ try:
 except:
     pass
 
-paths = datasets.download(name='ct/structseg', path='~/data')
+paths = datasets.download(name='ct/structseg', path='./data/StructSeg_Data')
 p = params.load(csv='./hyper.csv', row=0)
-configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}, }
+configs = {
+    'batch': {'size': p['batch_size'], 'fold': -1},
+    'specs': {
+        'xs': {'dat': {'shape': [1, 512, 512, 1]}},
+        'ys': {'lbl': {'shape': [1, 512, 512, 1]}}
+    }}
 path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
 
 client = Client(path, configs=configs)
@@ -77,7 +84,7 @@ def plaque_transform(cls=-1, model=None):
         data = data[1:-1]
         label = label[1:-1]
         label = dilate(label, 2)
-        data = np.clip(data, -1024, 400) / 200
+        data = np.clip(data, -1024, 256) / 128
         label[label != 0] = 1
         data, label = np.expand_dims(data, 1), np.expand_dims(label, 1)
         return data, label
@@ -274,12 +281,8 @@ def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
 def _train(train_data, test_data, x, epochs, filters, block_scale, alpha, beta, checkpoint_path):
     CHECKPOINT_PATH = os.path.join(p['output_dir'], checkpoint_path)
 
-    print(CHECKPOINT_PATH)
     if not os.path.isdir(CHECKPOINT_PATH):
         os.makedirs(CHECKPOINT_PATH, exist_ok=True)
-    else:
-        shutil.rmtree(CHECKPOINT_PATH)
-        os.makedirs(CHECKPOINT_PATH)
 
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(filepath=CHECKPOINT_PATH,
                                                                    save_weights_only=True,
@@ -295,33 +298,47 @@ def _train(train_data, test_data, x, epochs, filters, block_scale, alpha, beta, 
                                                           write_graph=True, profile_batch=0, )
 
     model = dense_unet(x, filters, block_scale)
-    model.compile(
-        optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
-        loss={'lbl': happy_meal(alpha, beta)},
-        metrics={'lbl': dsc_soft()}
-    )
+    if os.path.isfile(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path)):
+        model.load_weights(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
+    else:
+        model.compile(
+            optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+            loss={'lbl': happy_meal(alpha, beta)},
+            metrics={'lbl': dsc_soft()}
+        )
 
-    model.fit(x=train_data,
-              epochs=epochs,
-              steps_per_epoch=500,
-              validation_data=test_data,
-              validation_freq=1,
-              validation_steps=100,
-              callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback])
+        model.fit(x=train_data,
+                  epochs=epochs,
+                  steps_per_epoch=500,
+                  validation_data=test_data,
+                  validation_freq=1,
+                  validation_steps=100,
+                  callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback])
 
-    model.save(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
+        model.save(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
     return model
 
 
-def _eval(model=None, data=[], name=""):
+def _eval(model=None, data=[], name="", max=100):
     eval_path = os.path.join(p['output_dir'], 'images', name)
+    print('Writing Out To: ' + eval_path)
+
     if not os.path.isdir(eval_path):
         os.makedirs(eval_path, exist_ok=True)
-    for i, d in enumerate(data):
+    avg = 0
+    mini = 0 
+    maxi = 0
+
+    for i, d in tqdm(enumerate(data), total=max):
         if model is not None:
             logits = model.predict(d)
+            if type(d) is dict:
+                d = d['dat']
             if type(logits) is dict:
                 logits = logits['lbl']
+            avg += np.mean(d)
+            mini += np.min(d)
+            maxi += np.max(d)
 
         for b in range(d[0].shape[0]):
             if model is not None:
@@ -333,19 +350,23 @@ def _eval(model=None, data=[], name=""):
             data = tf.squeeze(d[0][b])
             img = plt.imshow(data)
             fig.savefig('{0}/input_{1}_{2}.png'.format(eval_path, i, b))
+        if i >= max:
+            break
+    print("AVG: {0}, MAX: {1}, MIN: {2}".format(avg/max, mini/max, maxi/max))
 
-
+    
 def train():
     plaque_train, plaque_test = data_process('./data/Plaque_Data', batch_size=p['batch_size'],
                                              transform='plaque', save_images=True)
 
-    thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'],
-                                                 transform='thoracic', save_images=True)
+    #thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'],
+    #                                             transform='thoracic', save_images=True)
 
-    thoracic_model = _train(gen_train, gen_valid, inputs, 50, p['filters1'], p['block_scale1'], p['alpha'], p['beta'],
+    thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'],
                             'ckp_1')
     _eval(thoracic_model, plaque_train, 'plaque_train')
     _eval(thoracic_model, plaque_test, 'plaque_test')
+    _eval(thoracic_model, gen_valid, 'heart_test')
 
     # plaque_model = _train(plaque_train, plaque_test, {'dat': Input(shape=(1, 512, 512, 1))}, p['epochs'],
     #                       p['filters2'], p['block_scale2'], p['gamma'],

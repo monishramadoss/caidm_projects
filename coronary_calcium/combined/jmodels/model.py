@@ -101,7 +101,9 @@ def thoracic_transform():
 
         shape = data.shape[-2]
         start = shape // 2 - crop // 2
-        
+        data = ndimage.interpolation.zoom(data, zoom, order=2)
+        label = ndimage.interpolation.zoom(label, zoom, order=2)
+        print(data.shape, label.shape)
         data = data[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
         label = label[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
 
@@ -110,10 +112,11 @@ def thoracic_transform():
         mask = (X - lx / 2) ** 2 + (Y - ly / 2) ** 2 > lx * ly / 4
         data[:, mask] = min
         label[:, mask] = 0
+        
 
         data = np.clip(data, -1024, 256) / 128
         label = np.clip(label, 0, 1)
-
+        
         data, label = np.expand_dims(data, 1), np.expand_dims(label, 1)
         return data, label
 

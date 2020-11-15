@@ -67,25 +67,26 @@ def load_save_mhd(secondary_path, idx=0):
 
     # label[label!=0] = 1
 
+    #np.save(os.path.join(secondary_path, 'data_ctai.npy'), data)
+    #np.save(os.path.join(secondary_path, ''))
     # print(data.shape, label.shape, misc.shape)
-    save_array('./image', data, 'data_{}.gif'.format(idx))
+    #save_array('./image', data, 'data_{}.gif'.format(idx))
     # save_array('./image', label, 'label_{}.gif'.format(idx))
-    save_array('./image', misc, 'misc_{}.gif'.format(idx))
-
+    #save_array('./image', misc, 'misc_{}.gif'.format(idx))
+    print('done with:', secondary_path, label.shape, np.max(label), np.min(label), data.shape, np.max(data),
+          np.min(data))
 
 def load_thoracic_data(root_path: str = "./jmodels/data/Thoracic_Data") -> None:
-    pool = multiprocessing.Pool(8)
-    pool.map(load_save_nii, [os.path.join(root_path, secondary_path) for secondary_path in os.listdir(root_path)])
-    pool.join()
-
+    with multiprocessing.Pool(24) as pool:
+        pool.map(load_save_nii, [os.path.join(root_path, secondary_path) for i, secondary_path in enumerate(os.listdir(root_path))])
+    
 
 def load_plaque_data(root_path: str = "./jmodels/data/Plaque_Data/Training_Set") -> None:
     root_path = os.path.join(root_path, 'Train')
-    dirs = [os.path.join(root_path, secondary_path) for secondary_path in os.listdir(root_path)]
-    for i in range(len(dirs)):
-        load_save_mhd(dirs[i], i)
-
+    dirs = [os.path.join(root_path, secondary_path) for i, secondary_path in enumerate(os.listdir(root_path))]
+    with multiprocessing.Pool(24) as pool:
+        pool.map(load_save_mhd, dirs)
 
 if __name__ == '__main__':
-    # load_thoracic_data()
+    load_thoracic_data()
     load_plaque_data()

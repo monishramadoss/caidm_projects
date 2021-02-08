@@ -40,8 +40,8 @@ def load_save_nii(secondary_path, idx=0):
     label = np.flip(label, axis=(2))
     label = label == 3
     label = label.astype(np.float32)
-    save_array('./image/', data, secondary_path.split('/')[-1] + '_data_.gif')
-    save_array('./image/', label, secondary_path.split('/')[-1] + '_label_.gif')
+    #save_array('./image/', data, secondary_path.split('/')[-1] + '_data_.gif')
+    #save_array('./image/', label, secondary_path.split('/')[-1] + '_label_.gif')
 
     np.save(os.path.join(secondary_path, 'data_cti.npy'), data)
     np.save(os.path.join(secondary_path, 'label_r.npy'), label)
@@ -50,8 +50,9 @@ def load_save_nii(secondary_path, idx=0):
 
 
 def load_save_mhd(secondary_path, idx=0):
-    misc_name = glob.glob1(secondary_path, '*ctai.mhd')[0]
-    data_name = glob.glob1(secondary_path, '*cti.mhd')[0]
+    misc_name = glob.glob1(secondary_path, '*ctai.mhd')
+    data_name = glob.glob1(secondary_path, '*cti.mhd')
+    print(misc_name, data_name)
     # label_name = glob.glob1(secondary_path, '*r.mhd')[0]
     misc_path = os.path.join(secondary_path, misc_name)
     data_path = os.path.join(secondary_path, data_name)
@@ -81,9 +82,10 @@ def load_thoracic_data(root_path: str = "./jmodels/data/Thoracic_Data") -> None:
         pool.map(load_save_nii, [os.path.join(root_path, secondary_path) for i, secondary_path in enumerate(os.listdir(root_path))])
     
 
-def load_plaque_data(root_path: str = "./jmodels/data/Plaque_Data/Training_Set") -> None:
-    root_path = os.path.join(root_path, 'Train')
+def load_plaque_data(root_path: str = "./jmodels/data/Plaque_Data") -> None:
+    #root_path = os.path.join(root_path)
     dirs = [os.path.join(root_path, secondary_path) for i, secondary_path in enumerate(os.listdir(root_path))]
+    print(dirs)
     with multiprocessing.Pool(24) as pool:
         pool.map(load_save_mhd, dirs)
 

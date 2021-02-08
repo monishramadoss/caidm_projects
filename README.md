@@ -1,3 +1,3 @@
 # caidm_projects
 
-research in to medical field.
+research in the medical field.

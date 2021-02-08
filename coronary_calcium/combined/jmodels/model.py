@@ -13,6 +13,8 @@ from scipy import ndimage
 from tensorflow import optimizers, losses
 from tensorflow.keras import Input, Model, layers
 
+
+
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -28,26 +30,27 @@ from jarvis.train.client import Client
 
 try:
     from jarvis.utils.general import gpus
-    gpus.autoselect(1)
+    gpus.autoselect(2)
 except:
     pass
 
-paths = datasets.download(name='ct/structseg', path='./data/StructSeg_Data')
 p = params.load(csv='./hyper.csv', row=1)
 configs = {
     'batch': {'size': p['batch_size'], 'fold': p['fold']},
     'specs': {
         'xs': {'dat': {'shape': [1, 512, 512, 1]}},
         'ys': {'lbl': {'shape': [1, 512, 512, 1]}}
-    }}
-path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
 
-client = Client(path, configs=configs)
-gen_train, gen_valid = client.create_generators()
-inputs = client.get_inputs(Input)
+    }}
+
+# paths = datasets.download(name='ct/structseg', path='./data/StructSeg_Data')
+# path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
+# client = Client(path, configs=configs)
+# gen_train, gen_valid = client.create_generators()
+# inputs = client.get_inputs(Input)
 
 os.makedirs(p['output_dir'], exist_ok=True)
-log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+log_dir = "{}/logs/".format(p['output_dir']) + 'log_file' #datetime.datetime.now().strftime("%d_%m_%Y-%H_%M%S")
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -55,10 +58,12 @@ import matplotlib.animation as animation
 
 def save_array(path, array, name):
     fig = plt.figure()
-    ims = [[plt.imshow(array[i, 0, ...], animated=True)] for i in range(array.shape[0])]
-    ani = animation.ArtistAnimation(fig, ims, interval=50, blit=True, repeat_delay=1000)
-    ani.save(os.path.join(path, name))
-
+    np.save(os.path.join(path, name + '.npy'), array)
+    
+    for i in range(array.shape[0]):
+        plt.imshow(array[i, 0, ...])
+        file_path = os.path.join(path, name + str(i) +'.png')
+        plt.savefig(str(file_path))
 
 if not os.path.isdir(log_dir):
     os.makedirs(log_dir)
@@ -83,7 +88,7 @@ def plaque_transform(cls=-1, model=None):
         data = data[1:-1]
         label = label[1:-1]
         label = dilate(label, 2)
-        data = np.clip(data, -1024, 256) / 128
+        data = np.clip(data, 0, 64) / 32
         label[label != 0] = 1
         data, label = np.expand_dims(data, 1), np.expand_dims(label, 1)
         return data, label
@@ -103,7 +108,7 @@ def thoracic_transform():
         start = shape // 2 - crop // 2
         data = ndimage.interpolation.zoom(data, zoom, order=2)
         label = ndimage.interpolation.zoom(label, zoom, order=2)
-        print(data.shape, label.shape)
+
         data = data[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
         label = label[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
 
@@ -111,10 +116,9 @@ def thoracic_transform():
         X, Y = np.ogrid[0:lx, 0:ly]
         mask = (X - lx / 2) ** 2 + (Y - ly / 2) ** 2 > lx * ly / 4
         data[:, mask] = min
-        label[:, mask] = 0
-        
+        label[:, mask] = 0        
 
-        data = np.clip(data, -1024, 256) / 128
+        data = np.clip(data, 0, 64) / 32
         label = np.clip(label, 0, 1)
         
         data, label = np.expand_dims(data, 1), np.expand_dims(label, 1)
@@ -138,8 +142,8 @@ def pre_process_func(data_path, file, transform, save_images):
             save_dir = os.path.join('./image/{0}/'.format(data_path.split('/')[-1]))
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir, exist_ok=True)
-            save_array(save_dir, data, file + '_data_.gif')
-            save_array(save_dir, label, file + '_label_.gif')
+            save_array(save_dir, data, file + '_data_')
+            save_array(save_dir, label, file + '_label_')
             print("done with: {}".format(main_path))
 
     return data, label
@@ -151,7 +155,7 @@ def pre_process_func_wrapper(args):
 
 def data_process(data_path, batch_size=4, transform=None, train_percent=0.8, save_images=True):
     pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]
-    with Pool(22) as pool:
+    with Pool(8) as pool:
         result = pool.map(pre_process_func_wrapper, pool_args)
 
     data_array = result[0][0]
@@ -299,24 +303,24 @@ def _train(train_data, test_data, x, epochs, filters, block_scale, alpha, beta, 
                                                           write_graph=True, profile_batch=0, )
 
     model = dense_unet(x, filters, block_scale)
-    if os.path.isfile(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path)):
-        model.load_weights(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
-    else:
-        model.compile(
-            optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
-            loss={'lbl': happy_meal(alpha, beta)},
-            metrics={'lbl': dsc_soft()}
-        )
+    #if os.path.isfile(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path)):
+    #    model.load_weights(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
 
-        model.fit(x=train_data,
-                  epochs=epochs,
-                  steps_per_epoch=500,
-                  validation_data=test_data,
-                  validation_freq=1,
-                  validation_steps=100,
-                  callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback])
+    model.compile(
+        optimizer=optimizers.Adam(learning_rate=8e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0),
+        loss={'lbl': happy_meal(alpha, beta)},
+        metrics={'lbl': dsc_soft()}
+    )
 
-        model.save(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
+    model.fit(x=train_data,
+              epochs=epochs,
+              steps_per_epoch=500,
+              validation_data=test_data,
+              validation_freq=1,
+              validation_steps=100,
+              callbacks=[tensorboard_callback, model_checkpoint_callback, reduce_lr_callback, early_stop_callback])
+
+    model.save(CHECKPOINT_PATH + "/{}_model.hdf5".format(checkpoint_path))
     return model
 
 
@@ -356,25 +360,28 @@ def _eval(model=None, data=[], name="", max=100):
     print("AVG: {0}, MAX: {1}, MIN: {2}".format(avg/max, mini/max, maxi/max))
 
 
-def train():
-    plaque_train, plaque_test = data_process('./data/Plaque_Data', batch_size=p['batch_size'],
+def train(): 
+    data_path = '/' + os.path.join(*(p['output_dir'].split('/')[:-2]))
+    plaque_train, plaque_test = data_process(os.path.join(data_path, 'data', 'Plaque_Data'), batch_size=p['batch_size'],
                                              transform='plaque', save_images=True)
 
-    thoracic_train, thoracic_test = data_process('./data/Thoracic_Data', batch_size=p['batch_size'],
-                                                 transform='thoracic', save_images=True)
+    thoracic_train, thoracic_test = data_process(os.path.join(data_path, 'data', 'Thoracic_Data'), batch_size=p['batch_size'],
+                                                 transform='thoracic', save_images=False)
 
-    # thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
- 
+    #thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+
     thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 512, 512, 1))}, 40,
                             p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
- 
     _eval(thoracic_model, plaque_train, 'plaque_train')
     _eval(thoracic_model, plaque_test, 'plaque_test')
     _eval(thoracic_model, gen_valid, 'heart_test')
 
-    # plaque_model = _train(plaque_train, plaque_test, {'dat': Input(shape=(1, 512, 512, 1))}, p['epochs'],
-    #                       p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'ckp_2')
+    #         plaque_model = _train(plaque_train, plaque_test, {'dat': Input(shape=(1, 512, 512, 1))}, p['epochs'],
+    #                               p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'ckp_2')
+    
+    
 
+        
 
 if __name__ == "__main__":
     train()

@@ -52,7 +52,9 @@ def load_save_nii(secondary_path, idx=0):
 def load_save_mhd(secondary_path, idx=0):
     misc_name = glob.glob1(secondary_path, '*ctai.mhd')
     data_name = glob.glob1(secondary_path, '*cti.mhd')
-    print(misc_name, data_name)
+    if misc_name == [] or data_name == []:
+        return
+    
     # label_name = glob.glob1(secondary_path, '*r.mhd')[0]
     misc_path = os.path.join(secondary_path, misc_name)
     data_path = os.path.join(secondary_path, data_name)
@@ -85,7 +87,6 @@ def load_thoracic_data(root_path: str = "./jmodels/data/Thoracic_Data") -> None:
 def load_plaque_data(root_path: str = "./jmodels/data/Plaque_Data") -> None:
     #root_path = os.path.join(root_path)
     dirs = [os.path.join(root_path, secondary_path) for i, secondary_path in enumerate(os.listdir(root_path))]
-    print(dirs)
     with multiprocessing.Pool(24) as pool:
         pool.map(load_save_mhd, dirs)
 

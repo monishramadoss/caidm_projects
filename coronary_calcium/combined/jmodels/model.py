@@ -30,7 +30,7 @@ from jarvis.train.client import Client
 
 try:
     from jarvis.utils.general import gpus
-    gpus.autoselect(2)
+    gpus.autoselect(1)
 except:
     pass
 
@@ -155,7 +155,7 @@ def pre_process_func_wrapper(args):
 
 def data_process(data_path, batch_size=4, transform=None, train_percent=0.8, save_images=True):
     pool_args = [(data_path, f, transform, save_images) for f in os.listdir(data_path)]
-    with Pool(8) as pool:
+    with Pool(4) as pool:
         result = pool.map(pre_process_func_wrapper, pool_args)
 
     data_array = result[0][0]
@@ -228,7 +228,7 @@ def dense_unet(inputs, filters=32, fs=1):
     # Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
 
-    TD1 = td_block(filters * 1, filters * 1, inputs['dat'], 0 * fs)
+    TD1 = td_block(filters * 1, filters * 1, inputs['dat'], 1 * fs)
     TD2 = td_block(filters * 1.5, filters * 1, TD1, 1 * fs)
     TD3 = td_block(filters * 2, filters * 1.5, TD2, 2 * fs)
     TD4 = td_block(filters * 2.5, filters * 2, TD3, 3 * fs)
@@ -363,15 +363,14 @@ def _eval(model=None, data=[], name="", max=100):
 def train(): 
     data_path = '/' + os.path.join(*(p['output_dir'].split('/')[:-2]))
     plaque_train, plaque_test = data_process(os.path.join(data_path, 'data', 'Plaque_Data'), batch_size=p['batch_size'],
-                                             transform='plaque', save_images=True)
+                                             transform='plaque', save_images=False)
 
     thoracic_train, thoracic_test = data_process(os.path.join(data_path, 'data', 'Thoracic_Data'), batch_size=p['batch_size'],
                                                  transform='thoracic', save_images=False)
 
     #thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
 
-    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 512, 512, 1))}, 40,
-                            p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 512, 512, 1))}, 40,  p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
     _eval(thoracic_model, plaque_train, 'plaque_train')
     _eval(thoracic_model, plaque_test, 'plaque_test')
     _eval(thoracic_model, gen_valid, 'heart_test')

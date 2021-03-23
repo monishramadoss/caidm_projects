@@ -11,8 +11,8 @@ def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
           'beta': [], 'use_mask': []}
     for alpha, beta in [(0.3, 1.0)]:
         for epochs in [200]:
-            for filters in [16, 32]:
-                for block_scale in [1, 2]:
+            for filters in [16, 32, 64]:
+                for block_scale in [1, 2, 3]:
                     for use_mask in [0, 1]:
                         # --- Create exp
                         for fold in range(1):

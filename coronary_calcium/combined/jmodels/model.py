@@ -14,7 +14,6 @@ from tensorflow import optimizers, losses
 from tensorflow.keras import Input, Model, layers
 
 
-
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -40,8 +39,7 @@ configs = {
     'specs': {
         'xs': {'dat': {'shape': [1, 512, 512, 1]}},
         'ys': {'lbl': {'shape': [1, 512, 512, 1]}}
-
-    }}
+}}
 
 # paths = datasets.download(name='ct/structseg', path='./data/StructSeg_Data')
 # path = '{}/data/ymls/client-heart.yml'.format(paths['code'])
@@ -370,7 +368,7 @@ def train():
 
     #thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
 
-    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 512, 512, 1))}, 40,  p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 1, 512, 512)}, 40,  p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
     _eval(thoracic_model, plaque_train, 'plaque_train')
     _eval(thoracic_model, plaque_test, 'plaque_test')
     _eval(thoracic_model, gen_valid, 'heart_test')

@@ -104,18 +104,20 @@ def thoracic_transform():
 
         shape = data.shape[-2]
         start = shape // 2 - crop // 2
+        
         data = ndimage.interpolation.zoom(data, zoom, order=2)
         label = ndimage.interpolation.zoom(label, zoom, order=2)
 
         data = data[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
         label = label[:, start - center_x:start + crop - center_x, start - center_y:start + crop - center_y]
-
+        
         lx, ly = data.shape[-2], data.shape[-1]
         X, Y = np.ogrid[0:lx, 0:ly]
         mask = (X - lx / 2) ** 2 + (Y - ly / 2) ** 2 > lx * ly / 4
-        data[:, mask] = min
-        label[:, mask] = 0        
-
+        
+        #data[:, mask] = min
+        #label[:, mask] = 0        
+        
         data = np.clip(data, 0, 64) / 32
         label = np.clip(label, 0, 1)
         
@@ -255,7 +257,6 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
         return (A / B) * scale
-
     return dsc
 
 
@@ -366,14 +367,14 @@ def train():
     thoracic_train, thoracic_test = data_process(os.path.join(data_path, 'data', 'Thoracic_Data'), batch_size=p['batch_size'],
                                                  transform='thoracic', save_images=False)
 
-    #thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    # thoracic_model = _train(gen_train, gen_valid, inputs, 40, p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
 
-    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 1, 512, 512)}, 40,  p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
+    thoracic_model = _train(thoracic_train, thoracic_test, {'dat': Input(shape=(1, 512, 512, 1))}, 40,  p['filters1'], p['block_scale1'], p['alpha'], p['beta'], 'ckp_1')
     _eval(thoracic_model, plaque_train, 'plaque_train')
     _eval(thoracic_model, plaque_test, 'plaque_test')
     _eval(thoracic_model, gen_valid, 'heart_test')
 
-    #         plaque_model = _train(plaque_train, plaque_test, {'dat': Input(shape=(1, 512, 512, 1))}, p['epochs'],
+    # plaque_model = _train(plaque_train, plaque_test, {'dat': Input(shape=(1, 512, 512, 1))}, p['epochs'],
     #                               p['filters2'], p['block_scale2'], p['gamma'], p['delta'], 'ckp_2')
     
     

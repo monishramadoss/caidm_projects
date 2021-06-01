@@ -10,13 +10,13 @@ def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
     df = {'output_dir': [], 'fold': [], 'batch_size': [], 'epochs': [], 'filters': [], 'block_scale': [],
           'negative': [], 'alpha': [], 'beta': []}
     for alpha, beta in [(0.3, 1.0)]:
-        for filters in [32, 64]:
-            for block_scale in [1, 2]:
+        for filters in [32]:
+            for block_scale in [1]:
                 for fold in range(1):
                     df['output_dir'].append('{0}/jmodels/exp/exp_{1}'.format(os.getcwd(), id))
                     df['fold'].append(fold)
-                    df['batch_size'].append(8)
-                    df['epochs'].append(200)
+                    df['batch_size'].append(4)
+                    df['epochs'].append(400)
                     df['filters'].append(filters)
                     df['block_scale'].append(block_scale)
                     df['alpha'].append(alpha)

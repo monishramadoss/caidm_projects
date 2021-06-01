@@ -82,18 +82,32 @@ def dense_unet(inputs, filters=32, fs=1):
 
     # Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
+    scale1 = p["scale"][0]
+    scale2 = p["scale"][1]
+    scale3 = p["scale"][2]
+    scale4 = p["scale"][3]
+    scale5 = p["scale"][4]
+    scale6 = p["scale"][5]
+    scalei = p["scalei"]
+    scaleo = p["scaleo"]
+    block1 = p["block"][0]
+    block2 = p["block"][1]
+    block3 = p["block"][2]
+    block4 = p["block"][3]
+    block5 = p["block"][4]
 
-    TD1 = td_block(filters * 1, filters * 1, inputs['dat'], 0 * fs)
-    TD2 = td_block(filters * 1.5, filters * 1, TD1, 1 * fs)
-    TD3 = td_block(filters * 2, filters * 1.5, TD2, 2 * fs)
-    TD4 = td_block(filters * 2.5, filters * 2, TD3, 3 * fs)
-    TD5 = td_block(filters * 3, filters * 2.5, TD4, 4 * fs)
+    
+    TD1 = td_block(filters * scale1, filters * scalei, inputs['dat'], block1 * fs)
+    TD2 = td_block(filters * scale2, filters * scale1, TD1, block2 * fs)
+    TD3 = td_block(filters * scale3, filters * scale2, TD2, block3 * fs)
+    TD4 = td_block(filters * scale4, filters * scale3, TD3, block4 * fs)
+    TD5 = td_block(filters * scale5, filters * scale4, TD4, block5 * fs)
 
-    TU1 = tu_block(filters * 2.5, filters * 3, TD5, TD4, 4 * fs)
-    TU2 = tu_block(filters * 2, filters * 2.5, TU1, TD3, 3 * fs)
-    TU3 = tu_block(filters * 1.5, filters * 2, TU2, TD2, 2 * fs)
-    TU4 = tu_block(filters * 1, filters * 1.5, TU3, TD1, 1 * fs)
-    TU5 = tran2(filters * 1, TU4)
+    TU1 = tu_block(filters * scale4, filters * scale5, TD5, TD4, block5 * fs)
+    TU2 = tu_block(filters * scale3, filters * scale4, TU1, TD3, block4 * fs)
+    TU3 = tu_block(filters * scale2, filters * scale3, TU2, TD2, block3 * fs)
+    TU4 = tu_block(filters * scale1, filters * scale2, TU3, TD1, block2 * fs)
+    TU5 = tran2(filters * scaleo, TU4)
     logits = {}
     logits['pna'] = layers.Conv3D(filters=2, name='pna', **kwargs)(TU5)
     model = Model(inputs=inputs, outputs=logits)

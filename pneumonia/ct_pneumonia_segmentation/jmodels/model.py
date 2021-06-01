@@ -27,7 +27,6 @@ from jarvis.utils.general import overload, gpus
 
 gpus.autoselect(1)
 
-
 def dense_unet(inputs, filters=32, fs=1):
     '''Model Creation'''
     # Define model#
@@ -92,13 +91,16 @@ def dense_unet(inputs, filters=32, fs=1):
 
 
 paths = datasets.download(name='ct/pna')
-
-p = params.load(csv='./hyper.csv', row=7)
-configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
+p = params.load(csv='./hyper.csv', row=0)
+configs = {'batch': {'size': p['batch_size'], 'fold': -1}}
 MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
-path = '{}/data/ymls/client-pub.yml'.format(paths['code'])
+path = '{}/data/ymls/client-all.yml'.format(paths['code'])
 client = Client(path, configs=configs)
-gen_train, gen_valid = client.create_generators()
+path2 = '{}/data/ymls/client-uci.yml'.format(paths['code'])
+client2 = Client(path2, configs={'batch': {'size': 1, 'fold': -1}})
+gen_train, _ = client.create_generators()
+gen_valid, _ = client2.create_generators()
+
 inputs = client.get_inputs(Input)
 
 log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -129,29 +131,25 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
         return (A / B) * scale
-
     return dsc
 
 
 def sce(weights=None, scale=1.0):
     loss = losses.SparseCategoricalCrossentropy(from_logits=True)
-
     @tf.function
     def sce(y_true, y_pred):
         return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
-
     return sce
 
 
 def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
     l2 = sce(weights, alpha)
     l1 = dsc_soft(None, beta, epsilon, cls)
-
     @tf.function
     def calc_loss(y_true, y_pred):
         return l2(y_true, y_pred) - l1(y_true, y_pred)
-
     return calc_loss
+
 
 
 def train():
@@ -161,13 +159,7 @@ def train():
         mode='max',
         save_best_only=True)
 
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(
-        log_dir,
-        histogram_freq=1,
-        write_images=True,
-        write_graph=True,
-        profile_batch=0,
-    )
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
 
     reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode="max",
                                                               verbose=1)
@@ -177,12 +169,8 @@ def train():
     model = dense_unet(inputs, p['filters'], p['block_scale'])
     model.compile(
         optimizer=optimizers.Adam(learning_rate=8e-4),
-        loss={
-            'pna': happy_meal(p['alpha'], p['beta'], weights=inputs['lng'])
-        },
-        metrics={
-            'pna': dsc_soft()
-        },
+        loss={ 'pna': happy_meal(p['alpha'], p['beta']) },
+        metrics={ 'pna': dsc_soft() },
         experimental_run_tf_function=False
     )
 
@@ -198,11 +186,6 @@ def train():
         callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]
     )
     model.save(MODEL_NAME)
-
-
-def test(model):
-    pass
-
 
 if __name__ == "__main__":
     train()

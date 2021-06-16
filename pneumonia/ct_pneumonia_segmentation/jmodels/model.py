@@ -21,11 +21,11 @@ from tensorflow.keras import Input, layers, Model
 # import tensorflow_addons as tfa
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # tf.compat.v1.disable_eager_execution()
-from jarvis.train import datasets, params
+from jarvis.train import datasets, params, custom
 from jarvis.train.client import Client
-from jarvis.utils.general import overload, gpus
+from jarvis.utils.general import overload #gpus
 
-gpus.autoselect(1)
+#gpus.autoselect(1)
 
 def dense_unet(inputs, filters=32, fs=1):
     '''Model Creation'''
@@ -34,7 +34,7 @@ def dense_unet(inputs, filters=32, fs=1):
     kwargs = {
         'kernel_size': (1, 3, 3),
         'padding': 'same',
-        'bias_initializer': 'zeros'}  # zeros, ones, golorit_uniform
+        'use_bias': False}  # zeros, ones, golorit_uniform
     # Define lambda functions#
     conv = lambda x, filters, strides: layers.Conv3D(filters=int(filters), strides=(1, strides, strides), **kwargs)(x)
     norm = lambda x: layers.BatchNormalization()(x)
@@ -73,7 +73,7 @@ def dense_unet(inputs, filters=32, fs=1):
     # Build Model#
     # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
 
-    TD1 = td_block(filters * 1, filters * 1, inputs['dat'], 0 * fs)
+    TD1 = td_block(filters * 1, filters * 1, inputs['dat'], 1 * fs)
     TD2 = td_block(filters * 1.5, filters * 1, TD1, 1 * fs)
     TD3 = td_block(filters * 2, filters * 1.5, TD2, 2 * fs)
     TD4 = td_block(filters * 2.5, filters * 2, TD3, 3 * fs)
@@ -96,8 +96,8 @@ def preprocess(self, arrays, **kwargs):
     lng = arrays['xs']['lng'] > 0
     pna = arrays['ys']['pna'] > 0
     msk[lng] = 1.0
-    msk[pna] = 10.0
-    #arrays['ys']['pna'][pna] = 1.0
+    # msk[pna] = 10.0
+    # arrays['ys']['pna'][pna] = 1.0
     arrays['xs']['lng'] = msk
     arrays['xs']['dat'] *= p['negative']
     return arrays
@@ -105,22 +105,22 @@ def preprocess(self, arrays, **kwargs):
 
 paths = datasets.download(name='ct/pna')
 p = params.load(csv='./hyper.csv', row=0)
-configs = {'batch': {'size': p['batch_size'], 'fold': -1}}
-MODEL_NAME = '{}/ckp/model.hdf5'.format(p['output_dir'])
-path = '{}/data/ymls/client-all.yml'.format(paths['code'])
+configs = {'batch': {'size': p['batch_size'], 'fold': 0}}
+MODEL_NAME = '{}/ckp/model.h5'.format(p['output_dir'])
+path = '{}/data/ymls/client.yml'.format(paths['code'])
 client = Client(path, configs=configs)
-path2 = '{}/data/ymls/client-uci.yml'.format(paths['code'])
-client2 = Client(path2, configs={'batch': {'size': 1, 'fold': -1}})
-gen_train, _ = client.create_generators()
-gen_valid, _ = client2.create_generators()
+gen_train, gen_valid = client.create_generators()
+
+
+# path2 = '{}/data/ymls/client-uci.yml'.format(paths['code'])
+# client2 = Client(path2, configs={'batch': {'size': 1, 'fold': -1}})
+# gen_valid, _ = client2.create_generators()
 
 inputs = client.get_inputs(Input)
 
 log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 if (not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
-
-
 
 
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
@@ -133,7 +133,7 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
             pred = pred * (weights[...])
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return scale - (A / B) * scale
+        return (1.0 - A / B) * scale
     return dsc
 
 
@@ -145,12 +145,12 @@ def sce(weights=None, scale=1.0):
     return sce
 
 
-def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(None, alpha)
-    l1 = dsc_soft(None, beta, epsilon, cls)
+def happy_meal(weights=None, alpha=5, beta=1,  epsilon=0.01, cls=1):
+    l2 = sce(weights, alpha)
+    l1 = dsc_soft(weights, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
-        return l2(y_true, y_pred) - l1(y_true, y_pred)
+        return l2(y_true, y_pred) + l1(y_true, y_pred)
     return calc_loss
 
 
@@ -158,22 +158,23 @@ def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
 def train():
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath='{}/ckp/'.format(p['output_dir']),
-        monitor='val_dsc',
+        monitor='val_dsc_1',
         mode='max',
         save_best_only=True)
 
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
+    #tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
 
-    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode="max",
+    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_1', factor=0.8, patience=2, mode="max",
                                                               verbose=1)
-    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max',
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc_1', patience=20, verbose=0, mode='max',
                                                            restore_best_weights=False)
 
     model = dense_unet(inputs, p['filters'], p['block_scale'])
+    print(model.summary())
     model.compile(
-        optimizer=optimizers.Adam(learning_rate=8e-4),
+        optimizer=optimizers.Adam(learning_rate=1e-4),
         loss={ 'pna': happy_meal(inputs['lng'], p['alpha'], p['beta'])},
-        metrics={ 'pna': dsc_soft() },
+        metrics={ 'pna': custom.dsc(weights=inputs['lng']) },
         experimental_run_tf_function=False
     )
 
@@ -181,14 +182,16 @@ def train():
 
     model.fit(
         x=gen_train,
-        epochs=p['epochs'],
-        steps_per_epoch=400,
+        epochs=20,
+        steps_per_epoch=800,
         validation_data=gen_valid,
-        validation_steps=100,
+        validation_steps=400,
         validation_freq=1,
-        callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback, tensorboard_callback]
+        callbacks=[model_checkpoint_callback, reduce_lr_callback, early_stop_callback]
     )
-    model.save(MODEL_NAME)
+
+    model.save(MODEL_NAME, overwrite=True, include_optimizer=False)
+
 
 if __name__ == "__main__":
     train()

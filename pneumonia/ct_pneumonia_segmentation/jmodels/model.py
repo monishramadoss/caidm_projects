@@ -90,6 +90,19 @@ def dense_unet(inputs, filters=32, fs=1):
     return model
 
 
+@overload(Client)
+def preprocess(self, arrays, **kwargs):
+    msk = np.zeros(arrays['xs']['dat'].shape)
+    lng = arrays['xs']['lng'] > 0
+    pna = arrays['ys']['pna'] > 0
+    msk[lng] = 1.0
+    msk[pna] = 10.0
+    #arrays['ys']['pna'][pna] = 1.0
+    arrays['xs']['lng'] = msk
+    arrays['xs']['dat'] *= p['negative']
+    return arrays
+
+
 paths = datasets.download(name='ct/pna')
 p = params.load(csv='./hyper.csv', row=0)
 configs = {'batch': {'size': p['batch_size'], 'fold': -1}}
@@ -108,16 +121,6 @@ if (not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
 
 
-@overload(Client)
-def preprocess(self, arrays, **kwargs):
-    msk = np.zeros(arrays['xs']['dat'].shape)
-    lng = arrays['xs']['lng'] > 0
-    pna = arrays['ys']['pna'] > 0
-    msk[lng] = 1
-    msk[pna] = 5
-    arrays['xs']['lng'] = msk
-    arrays['xs']['dat'] *= p['negative']
-    return arrays
 
 
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
@@ -130,7 +133,7 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
             pred = pred * (weights[...])
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return (A / B) * scale
+        return scale - (A / B) * scale
     return dsc
 
 
@@ -143,7 +146,7 @@ def sce(weights=None, scale=1.0):
 
 
 def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(weights, alpha)
+    l2 = sce(None, alpha)
     l1 = dsc_soft(None, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
@@ -169,7 +172,7 @@ def train():
     model = dense_unet(inputs, p['filters'], p['block_scale'])
     model.compile(
         optimizer=optimizers.Adam(learning_rate=8e-4),
-        loss={ 'pna': happy_meal(p['alpha'], p['beta']) },
+        loss={ 'pna': happy_meal(inputs['lng'], p['alpha'], p['beta'])},
         metrics={ 'pna': dsc_soft() },
         experimental_run_tf_function=False
     )

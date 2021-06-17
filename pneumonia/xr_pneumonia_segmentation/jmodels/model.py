@@ -21,18 +21,25 @@ from tensorflow.keras import Input, layers, Model
 # import tensorflow_addons as tfa
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # tf.compat.v1.disable_eager_execution()
-from jarvis.train import datasets, params
+from jarvis.train import datasets, params, custom
 from jarvis.train.client import Client
-from jarvis.utils.general import overload, gpus
+from jarvis.utils.general import overload #, gpus
 
-gpus.autoselect(1)
-LABEL_NAME = 'pna-seg'
+#gpus.autoselect(1)
+LABEL_NAME = 'pna'
 
 paths = datasets.download(name='xr/pna')
 p = params.load(csv='./hyper.csv', row=0)
-configs = {'batch': {'size': p['batch_size'], 'fold': p['fold']}}
+
+configs = {'batch': {'size': 2, 'fold': p['fold']}, 
+           'specs':{'xs': {'msk':{'dtype': 'float32'}},
+                    'ys': {LABEL_NAME:{'dtype': 'float32'}}
+                   }
+          }
+
+
 MODEL_NAME = '{}/ckp/model.h5'.format(p['output_dir'])
-path = '{}/data/ymls/client-pub-all-512-seg.yml'.format(paths['code'])
+path = '{}/data/ymls/client-seg.yml'.format(paths['code'])
 client = Client(path, configs=configs)
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
@@ -41,7 +48,7 @@ log_dir = "{}/logs/".format(p['output_dir']) + datetime.datetime.now().strftime(
 if (not os.path.isdir(log_dir)):
     os.makedirs(log_dir)
 
-def dense_unet(inputs, filters=32, fs=1):
+def dense_unet(inputs, filters=32):
     '''Model Creation'''
     # Define model#
     # Define kwargs dictionary#
@@ -65,70 +72,54 @@ def dense_unet(inputs, filters=32, fs=1):
 
     # Define Dense Block#
     def dense_block(filters, input, DB_depth):
-        ext = 4 + DB_depth
+        ext = 3 + DB_depth
         outside_layer = input
-        filters = int(filters)
         for _ in range(0, int(ext)):
             inside_layer = conv1(filters, outside_layer)
             outside_layer = concat(outside_layer, inside_layer)
         return outside_layer
 
     def td_block(conv1_filters, conv2_filters, input, DB_depth):
-        conv1_filters = int(conv1_filters)
-        conv2_filters = int(conv2_filters)       
         TD = conv1(conv1_filters, conv2(conv2_filters, input))
         DB = dense_block(conv1_filters, TD, DB_depth)
         return DB
 
-    def tu_block(conv1_filters, tran2_filters, input, td_input, DB_depth):
-        conv1_filters = int(conv1_filters)
-        tran2_filters = int(tran2_filters)        
-        TU = conv1(conv1_filters, tran2(tran2_filters, input))
+    def tu_block(conv1_filters, tran2_filters, input, td_input, DB_depth, skip_DB_depth=1):
+        t1 = tran2(tran2_filters, input)
+        TU = dense_block(conv1_filters, t1, skip_DB_depth)
         C = concat(TU, td_input)
         DB = dense_block(conv1_filters, C, DB_depth)
         return DB
 
-    scalei = p["scalei"]
-    scaleo = p["scaleo"]
-    
-    scale1 = p["scale1"]
-    scale2 = p["scale2"]
-    scale3 = p["scale3"]
-    scale4 = p["scale4"]
-    scale5 = p["scale5"]
-    
-    block1 = p["block1"]
-    block2 = p["block2"]
-    block3 = p["block3"]
-    block4 = p["block4"]
-    block5 = p["block5"]
+    # Build Model#
+    # TD = convolutions that train down, DB = Dense blocks, TU = Transpose convolutions that train up, C = concatenation groups.
 
-    TD1 = td_block(filters * scale1, filters * scalei, inputs['dat'], block1 * fs)
-    TD2 = td_block(filters * scale2, filters * scale1, TD1, block2 * fs)
-    TD3 = td_block(filters * scale3, filters * scale2, TD2, block3 * fs)
-    TD4 = td_block(filters * scale4, filters * scale3, TD3, block4 * fs)
-    TD5 = td_block(filters * scale5, filters * scale4, TD4, block5 * fs)
+    TD1 = td_block(filters * 1, filters * 4, inputs['dat'], 1)
+    TD2 = td_block(filters * 1.5, filters * 1, TD1, 1)
+    TD3 = td_block(filters * 2, filters * 1.5, TD2, 1)
+    TD4 = td_block(filters * 2.5, filters * 2, TD3, 3)
+    TD5 = td_block(filters * 3, filters * 2.5, TD4, 3)
 
-    TU1 = tu_block(filters * scale4, filters * scale5, TD5, TD4, block5 * fs)
-    TU2 = tu_block(filters * scale3, filters * scale4, TU1, TD3, block4 * fs)
-    TU3 = tu_block(filters * scale2, filters * scale3, TU2, TD2, block3 * fs)
-    TU4 = tu_block(filters * scale1, filters * scale2, TU3, TD1, block2 * fs)
-    TU5 = tran2(filters * scaleo, TU4)
+    TU1 = tu_block(filters * 2.5, filters * 3, TD5, TD4, 3, 3)
+    TU2 = tu_block(filters * 2, filters * 2.5, TU1, TD3, 3, 3)
+    TU3 = tu_block(filters * 1.5, filters * 2, TU2, TD2, 1, 1)
+    TU4 = tu_block(filters * 1, filters * 1.5, TU3, TD1, 1, 1)
+    TU5 = tran2(filters * 1, TU4)
     
     logits = {}
     logits[LABEL_NAME] = layers.Conv3D(filters=2, name=LABEL_NAME, **kwargs)(TU5)
     model = Model(inputs=inputs, outputs=logits)
     return model
 
-@overload(Client)
-def preprocess(self, arrays, **kwargs):
-    msk = np.zeros(arrays['xs']['dat'].shape)
-    lng = arrays['xs']['msk'] > 0
-    pna = arrays['ys'][LABEL_NAME] > 0
-    msk[lng] = 1
-    msk[pna] = 10
-    arrays['xs']['msk'] = msk
-    return arrays
+# @overload(Client)
+# def preprocess(self, arrays, **kwargs):
+#     msk = np.zeros(arrays['xs']['dat'].shape)
+#     lng = arrays['xs']['msk'] > 0
+#     pna = arrays['ys'][LABEL_NAME] > 0
+#     msk[lng] = 1
+#     #msk[pna] = 10
+#     arrays['xs']['msk'] = msk
+#     return arrays
 
 
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
@@ -141,7 +132,7 @@ def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
             pred = pred * (weights[...])
         A = tf.math.reduce_sum(true * pred) * 2
         B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return (A / B) * scale
+        return (1.0 - A / B) * scale
     return dsc
 
 
@@ -153,14 +144,13 @@ def sce(weights=None, scale=1.0):
     return sce
 
 
-def happy_meal(alpha=5, beta=1, weights=None, epsilon=0.01, cls=1):
-    l2 = sce(weights, alpha)
-    l1 = dsc_soft(None, beta, epsilon, cls)
+def happy_meal(weights=None, alpha=5, beta=1,  epsilon=0.01, cls=1):
+    l2 = sce(None, alpha)
+    l1 = dsc_soft(weights, beta, epsilon, cls)
     @tf.function
     def calc_loss(y_true, y_pred):
-        return l2(y_true, y_pred) - l1(y_true, y_pred)
+        return l2(y_true, y_pred) + l1(y_true, y_pred)
     return calc_loss
-
 
 def train():
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -169,36 +159,36 @@ def train():
         mode='max',
         save_best_only=True)
     
-    tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
-#     reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='dsc', factor=0.8, patience=2, mode="max", verbose=1)
-    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='dsc', patience=20, verbose=0, mode='max', restore_best_weights=False)
+    #tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
+    reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_1', factor=0.8, patience=2, mode="max", verbose=1)
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc_1', patience=20, verbose=0, mode='max', restore_best_weights=False)
 
-    model = dense_unet(inputs, p['filters'], p['block_scale'])
-    if p['use_mask'] == 1:
+    model = dense_unet(inputs, p['filters'])
+    if True:
         model.compile(
             optimizer=optimizers.Adam(learning_rate=2e-5),
-            loss={LABEL_NAME: happy_meal(p['alpha'], p['beta'], weights=inputs['msk'])},
-            metrics={LABEL_NAME: dsc_soft()},
+            loss={LABEL_NAME: happy_meal(weights=inputs['msk'], alpha=p['alpha'], beta=p['beta'])},
+            metrics={LABEL_NAME: custom.dsc(weights=inputs['msk'])},
             experimental_run_tf_function=False
         )
     else:
         model.compile(
             optimizer = optimizers.Adam(learning_rate=2e-5),
-            loss={LABEL_NAME: happy_meal(p['alpha'], p['beta'])},
-            metrics={LABEL_NAME: dsc_soft()},
+            loss={LABEL_NAME: happy_meal(None, p['alpha'], p['beta'])},
+            metrics={LABEL_NAME: custom.dsc()},
             experimental_run_tf_function=False
         )
 
     model.fit(
         x=gen_train,
-        epochs=p['epochs'],
-        steps_per_epoch=1000,
+        epochs=10,
+        steps_per_epoch=500,
         validation_data=gen_valid,
         validation_steps=250,
-        validation_freq=1,
-        callbacks=[model_checkpoint_callback, tensorboard_callback, early_stop_callback]
+        validation_freq=2,
+        callbacks=[model_checkpoint_callback,  early_stop_callback]
     )
-    model.save(MODEL_NAME)
+    model.save(MODEL_NAME, overwrite=True, include_optimizer=False)
     
 
 if __name__ == "__main__":

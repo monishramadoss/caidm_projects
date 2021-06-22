@@ -84,6 +84,6 @@ for p in model_files:
     
     try:
         os.system('rm -rf "{0}/scripts"'.format(export_dir))
-        os.system('jarvis script -jmodels ./models/{0}} -name ct_organ_seg_{0} -output_dir "{1}/scripts"'.format(name, export_dir))
+        os.system('jarvis script -jmodels ./models/{0} -name ct_organ_seg_{0} -output_dir "{1}/scripts"'.format(name, export_dir))
     except Exception as e:
         print(e)

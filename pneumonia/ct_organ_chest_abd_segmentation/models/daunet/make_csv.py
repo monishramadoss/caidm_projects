@@ -15,8 +15,7 @@ def create_hyper_csv(fname='./jmodels/hyper.csv', overwrite=False):
                 df['batch_size'].append(4)
                 df['filters'].append(filters)
                 df['alpha'].append(alpha)
-                df['beta'].append(beta)
-                
+                df['beta'].append(beta)                
                 os.makedirs('{0}/jmodels/exp/exp_{1}'.format(os.getcwd(), id), exist_ok=True)
                 id += 1
 

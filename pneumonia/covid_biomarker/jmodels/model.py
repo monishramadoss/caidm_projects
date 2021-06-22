@@ -2,6 +2,9 @@ import tensorflow as tf
 from tensorflow import optimizers, losses
 from tensorflow.keras import Input, layers, Model
 
+if tf.__version__[:3] == '2.3':
+    tf.compat.v1.disable_eager_execution()
+
 def conv_bn_relu(input, filters, kernel_size=3, stride=1, name=None):
     x = layers.Conv3D(filters, (1, kernel_size, kernel_size), padding='same', strides=(1, stride, stride), name=name, use_bias=False)(input)
     x = layers.BatchNormalization()(x)
@@ -60,7 +63,7 @@ def preprocess(self, arrays, row, **kwargs):
 
 # --- Create a test Client
 client = Client('/data/raw/covid_biomarker/data/ymls/client-dual-256.yml')
-gen_train_all, gen_valid = client.create_generators()
+gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 #tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir)
 
@@ -69,13 +72,45 @@ reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_1', f
 early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc_1', patience=5, verbose=0, mode='max',
                                                         restore_best_weights=False)
 
-model = unet(inputs, 32)
+def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
+    @tf.function
+    def dsc(y_true, y_pred):
+        true = tf.cast(y_true[..., 0] == cls, tf.float32)
+        pred = tf.nn.softmax(y_pred, axis=-1)[..., cls]
+        if weights is not None:
+            true = true * (weights[...])
+            pred = pred * (weights[...])
+        A = tf.math.reduce_sum(true * pred) * 2
+        B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
+        return (1.0 - A / B) * scale
+    return dsc
+
+
+def sce(weights=None, scale=1.0):
+    loss = losses.SparseCategoricalCrossentropy(from_logits=True)
+    @tf.function
+    def sce(y_true, y_pred):
+        return loss(y_true=y_true, y_pred=y_pred, sample_weight=weights) * scale
+    return sce
+
+
+def happy_meal(weights=None, alpha=5, beta=1,  epsilon=0.01, cls=1):
+    l2 = sce(None, alpha)
+    l1 = dsc_soft(weights, beta, epsilon, cls)
+    @tf.function
+    def calc_loss(y_true, y_pred):
+        return l2(y_true, y_pred) + l1(y_true, y_pred)
+    return calc_loss
+
+model = unet(inputs,label,  32)
 #model = da_unet(inputs)
 print(model.summary())
 model.compile(
     optimizer=optimizers.Adam(learning_rate=1e-4),
-    loss={ 'lbl': happy_meal(None, p['alpha'], p['beta'])},
-    metrics={ 'lbl': custom.dsc() },
+    loss={ label: happy_meal(weights=inputs['msk-pna'], alpha=1.0, beta=1.0),
+            'ratio': custom.mse(weights=inputs['msk-ratio'])},
+    metrics={ label: custom.dsc(weights=inputs['msk-pna']),
+            'ratio': custom.mae(weights=inputs['msk-ratio']), },
     experimental_run_tf_function=False
 )
 

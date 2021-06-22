@@ -81,3 +81,10 @@ for p in model_files:
     file_path = export_dir / (name + '.py')
     with file_path.open('w', encoding='utf-8') as f:
         f.write(train_template_str)
+    
+    try:
+        os.system('rm -rf "{0}/scripts"'.format(export_dir))
+        os.system('jarvis script -jmodels ./models/{0}} -name ct_organ_seg_{0} -output_dir "{1}/scripts"'.format(name, export_dir))
+    except:
+        pass
+

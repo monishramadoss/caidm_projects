@@ -52,7 +52,7 @@ def preprocess(self, arrays, row, **kwargs):
     if row['corhort-uci']:
         arrays['xs']['msk-pna'][:] = 0.0
         arrays['xs']['msk-ratio'][:] = 1.0
-    ​else:
+    else:
         arrays['xs']['msk-pna'][:] = 1.0
         arrays['xs']['msk-ratio'][:] = 0.0
     arrays['xs']['msk-pna'] = arrays['xs']['msk-pna'] > 0

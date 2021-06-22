@@ -54,7 +54,7 @@ for p in model_files:
                     
     
     define = str(name) + '(inputs, labels,\n\t\t'
-    if hp_json.is_file():
+    if not hp_json.is_file():
         hp_json.touch()
         hp_json_export = {}
         for k, v in params.items():

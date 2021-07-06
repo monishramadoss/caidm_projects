@@ -65,29 +65,12 @@ def preprocess(self, arrays, row, **kwargs):
     return arrays
 
 # --- Create a test Client
-<<<<<<< HEAD:pneumonia/covid_biomarker/dual_loss/model.py
-client = Client('/data/raw/covid_biomarker/data/ymls/client-dual-512.yml')
-=======
 client = Client('/data/raw/covid_biomarker/data/ymls/client-dual-256.yml')
->>>>>>> a8c029a8ad3b63123928c88ed24350f9ab09d236:pneumonia/covid_biomarker/jmodels/model.py
 gen_train, gen_valid = client.create_generators()
 inputs = client.get_inputs(Input)
 
 reduce_lr_callback = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_dsc_1', factor=0.8, patience=2, mode="max", verbose=1)
 early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_dsc_1', patience=5, verbose=0, mode='max', restore_best_weights=False)
-
-def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
-    @tf.function
-    def dsc(y_true, y_pred):
-        true = tf.cast(y_true[..., 0] == cls, tf.float32)
-        pred = tf.nn.softmax(y_pred, axis=-1)[..., cls]
-        if weights is not None:
-            true = true * (weights[...])
-            pred = pred * (weights[...])
-        A = tf.math.reduce_sum(true * pred) * 2
-        B = tf.math.reduce_sum(true) + tf.math.reduce_sum(pred) + epsilon
-        return (1.0 - A / B) * scale
-    return dsc
 
 
 def sce(weights=None, scale=1.0):
@@ -106,16 +89,6 @@ def happy_meal(weights=None, alpha=5, beta=1,  epsilon=0.01, cls=1):
         return l2(y_true, y_pred) + l1(y_true, y_pred)
     return calc_loss
 
-<<<<<<< HEAD:pneumonia/covid_biomarker/dual_loss/model.py
-model = unet(inputs, label,  32)
-print(model.summary())
-model.compile(
-    optimizer=optimizers.Adam(learning_rate=1e-4),
-    loss={      label: happy_meal(weights=inputs['msk-pna'], alpha=1.0, beta=1.0),
-                'ratio': custom.mse(weights=inputs['msk-ratio'])},
-    metrics={   label: custom.dsc(weights=inputs['msk-pna']),
-                'ratio': custom.mae(weights=inputs['msk-ratio']), },
-=======
 def dsc_soft(weights=None, scale=1.0, epsilon=0.01, cls=1):
     @tf.function
     def dsc(y_true, y_pred):
@@ -155,7 +128,6 @@ model.compile(
             'ratio': custom.mse(weights=inputs['msk-ratio'])},
     metrics={ label: custom.dsc(weights=inputs['msk-pna']),
             'ratio': custom.mae(weights=inputs['msk-ratio']), },
->>>>>>> a8c029a8ad3b63123928c88ed24350f9ab09d236:pneumonia/covid_biomarker/jmodels/model.py
     experimental_run_tf_function=False
 )
 

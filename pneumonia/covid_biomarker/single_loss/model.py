@@ -122,7 +122,7 @@ model.fit(
 
 
 model.trainable=False
-model.save('model.h5')
+model.save('model.h5', overwrite=True, include_optimizer=False)
 
 # new_model = tf.keras.models.load_model('./model.h5')
 # print(new_model.summary())

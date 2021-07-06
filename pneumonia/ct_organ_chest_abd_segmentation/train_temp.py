@@ -9,10 +9,10 @@ import kerastuner as kt
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 from jarvis.train import datasets, params, custom
 from jarvis.train.client import Client
-from jarvis.utils.general import overload #
+from jarvis.utils.general import overload 
 try:
     from jarvis.utils.general import gpus
-    gpus.autoselect(2)
+    gpus.autoselect(1)
 
 except:
     pass
@@ -33,7 +33,6 @@ for key, arr in ys.items():
     print('ys key: {} | shape = {}'.format(key.ljust(8), arr.shape))
 
 inputs = client.get_inputs(Input)
-client.load_data_in_memory()
 labels = 'lbl'
 
 %(model)s
